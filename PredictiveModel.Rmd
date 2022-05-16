@@ -1,0 +1,93 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Predictive Modelling Part
+
+```{r}
+#install packages
+if (!require("pacman")) install.packages("pacman")
+require("pacman", character.only = TRUE, quietly = TRUE)
+p_load(tidyverse)
+library("readxl")
+p_load(lubridate)
+library('stringr')
+```
+
+```{r}
+first_cycling_data <- read.csv("Races_WITHindex.csv", header = TRUE)
+pro_cycling_data <- read_excel("RiderData.xlsx")
+```
+
+```{r}
+#impute missing UCIs with 0 as missing values means that the driver finished outside of the points and thus did not earn any
+first_cycling_data$UCI[is.na(first_cycling_data$UCI)] <- 0
+```
+
+```{r}
+#merge on name and team (because what if a rider switches teams?)
+#merge Given Name and Family name to one column: Rider (necessary for merge)
+pro_cycling_data$Rider <- str_c(pro_cycling_data$`Given Name`, ' ', pro_cycling_data$`Family Name`)
+
+# merge two data frames by ID
+basetable <- merge(first_cycling_data, pro_cycling_data,by="Rider")
+
+```
+
+```{r}
+#define succes on team basis: annually more (or equal) points than the previous year = succes?
+basetable$success <- ifelse(basetable$Pos <= 60, 1, 0)
+basetable$podium <- ifelse(basetable$Pos <= 3, 1, 0)
+```
+
+```{r}
+#check missing values
+colSums(is.na(basetable))
+#Var_9 has a high amount of missing values, as well as VAR_16, so we will drop those
+```
+
+
+```{r}
+#drop columns that are not of any use
+drop <- c("X.x", "Rider_ID", "Team_ID", "ID", "Family Name", "Given Name", "Name", "Team.y", "Region", "ID2", "VAR10", "VAR9", "VAR16")
+basetable = basetable[,!(names(basetable) %in% drop)]
+```
+
+```{r}
+#get age of rider
+basetable$Birthday <- as.Date(basetable$Birthday)
+basetable$age <- as.numeric(year(Sys.Date()) - year(basetable$Birthday))
+#drop birthday
+drop <- c("Birthday")
+basetable = basetable[,!(names(basetable) %in% drop)]
+```
+
+
+```{r}
+basetable %>%
+    glimpse()
+```
+
+```{r}
+#drop columns that are not of any use
+drop <- c("Rider", "Pos", "Rider_Country", "Time", "UCI", "VAR32")
+basetable = basetable[,!(names(basetable) %in% drop)]
+
+
+#Time is dropped because this is highly correlated with position and thus success.
+#Rider_Country is dropped but can be changed to dummy. However, I did not do this now to keep dimensionality low.
+#UCI is dropped because this is highly correlated with success.
+#VAR32 contains years, this does not seem usefull in analysis
+```
+
+Next Steps:
+This basetable can be passed on to the modelling phase easily. My reasoning was that the predictive model should be kept on the individual level. The goal is to predict whether the driver will have a successful race. Therefore, the table should not be grouped on driver or year. Success is defined as: 'did the driver end in the point at the end of this race?' We do not define an explicit time window, however, as one can reason: the dependent period is during the race and the independent period is after the driver has finished.
+
+The predictive model is used to predict success. These outcomes will be passed on to the Prescriptive part, which has the objective to maximize success on team basis, meaning: as many drivers as possible finish with points. More specifically:
+
+Objective: Max(points per team)
+          with points = success. This indicates that this problem will be solved using integer programming.
+          
+This should be done by aggregating on team and on race, maybe look at the yearly scores as well.
+Note: 'Team.x', 'Race_ID' and 'Year' are not dropped because it is necessary for the prescriptive part. For the predictive model they should be dropped.
