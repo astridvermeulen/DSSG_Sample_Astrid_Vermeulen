@@ -1,0 +1,37 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Predictive Modelling Part
+
+```{r}
+#install packages
+if (!require("pacman")) install.packages("pacman")
+require("pacman", character.only = TRUE, quietly = TRUE)
+p_load(tidyverse)
+```
+
+```{r}
+first_cycling_data <- read.csv("./Races_WITHindex.csv")
+```
+
+```{r}
+#impute missing UCIs with 0 as missing values means that the driver finished outside of the points and thus did not earn any
+first_cycling_data$UCI[is.na(first_cycling_data$UCI)] <- 0
+```
+
+```{r}
+#merge on name and team (because what if a rider switches teams?)
+
+```
+
+```{r}
+#define succes on team basis: annually more (or equal) points than the previous year = succes?
+
+
+#define team selection: as many riders in the points?
+
+
+```
+
