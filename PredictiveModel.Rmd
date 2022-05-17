@@ -31,7 +31,7 @@ first_cycling_data$UCI[is.na(first_cycling_data$UCI)] <- 0
 pro_cycling_data$Rider <- str_c(pro_cycling_data$`Given Name`, ' ', pro_cycling_data$`Family Name`)
 
 # merge two data frames by ID
-basetable <- merge(first_cycling_data, pro_cycling_data,by="Rider")
+basetable <- merge(first_cycling_data, pro_cycling_data, by="Rider")
 
 ```
 
