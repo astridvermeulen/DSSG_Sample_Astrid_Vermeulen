@@ -61,7 +61,8 @@ basetable$points <- ifelse(basetable$Pos == '01', 10,
 
 
 #Define that a driver has a specialty in a specific category if he has a score in that category above 75
-#Exact cutoff also up for discussion, most categories have a range between +-50 and +-83
+#Exact cutoff also up for discussion, mcategories have a range between 50 and 85
+#https://web.cyanide-studio.com/games/cycling/2021/pcm/guide/basics-specialisations/
 basetable$flat_driver <- ifelse(basetable$FLAT >= 75,1,0)
 basetable$mountain_driver <- ifelse(basetable$MOUNTAIN >= 75,1,0)
 basetable$downhill_driver <- ifelse(basetable$DOWNHILL >= 75,1,0)
@@ -98,7 +99,25 @@ team_scores_per_race <-basetable %>%
 #Something with avg price of team, but every rider has FREE
 length(unique(basetable[["Price"]]))
 
+#How to differ the stages of a tour race like Tour de France?
 
+Race_ID <- unique(basetable$Race_ID)
+Race_Type_Flat <- c(1,)
+Race_Type_Mountain <- c(0,)
+Race_Type_Downhill <- c(0)
+Race_Type_Cobbles <- c(0)
+Race_Type_TT <- c(0)
+Race_Type_Prologue <- c(0)
+Race_Type_Sprint<- c(1)
+Race_Type_Acceleration <- c(0)
+Race_Type_Resistance
+Race_Type_Endurance
+Race_Type_Recup 
+Race_Type_Hill
+Race_Type_Attack
+Race_Type_Multiple_Stage
+
+#Trial prediction with Random Forest
 ## 50% of the sample size
 smp_size <- floor(0.50 * nrow(team_scores_per_race))
 
