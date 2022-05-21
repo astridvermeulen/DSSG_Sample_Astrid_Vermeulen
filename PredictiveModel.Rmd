@@ -6,6 +6,10 @@ output: html_notebook
 Predictive Modelling Part
 
 ```{r}
+rm(list = ls())
+```
+
+```{r}
 #install packages
 if (!require("pacman")) install.packages("pacman")
 require("pacman", character.only = TRUE, quietly = TRUE)
@@ -13,6 +17,7 @@ p_load(tidyverse)
 library("readxl")
 p_load(lubridate)
 library('stringr')
+set.seed(123)
 ```
 
 ```{r}
@@ -37,6 +42,9 @@ basetable <- merge(first_cycling_data, pro_cycling_data,by="Rider")
 
 ```{r}
 #define succes on team basis: annually more (or equal) points than the previous year = succes?
+basetable$Pos <- ifelse(basetable$Pos == 'DNF', 100, basetable$Pos)
+#basetable$Pos <- as.integer(basetable$Pos)
+
 basetable$success <- ifelse(basetable$Pos <= 60, 1, 0)
 basetable$podium <- ifelse(basetable$Pos <= 3, 1, 0)
 ```
@@ -50,19 +58,22 @@ colSums(is.na(basetable))
 
 ```{r}
 #drop columns that are not of any use
-drop <- c("X.x", "Rider_ID", "Team_ID", "ID", "Family Name", "Given Name", "Name", "Team.y", "Region", "ID2", "VAR10", "VAR9", "VAR16")
+drop <- c("X.x", "Rider_ID", "Team_ID", "ID", "Family Name", "Given Name", "Name", "Team.y", "Region", "ID2", "VAR10", "VAR9", "VAR16",
+          "VAR25", "VAR26", "VAR23", "Team.x", "VAR24", "VAR29", "VAR27", "VAR28", "VAR21", "VAR22", "VAR20", "X.y", "VAR2", "VAR3",
+          "VAR5", "VAR6", "VAR14", "VAR15", "Type", "VAR12", "VAR13", "VAR18", "Price", "VAR19", "VAR17", "VAR8", "VAR11", "VAR30",
+          "VAR31")
 basetable = basetable[,!(names(basetable) %in% drop)]
 ```
 
 ```{r}
 #get age of rider
-basetable$Birthday <- as.Date(basetable$Birthday)
-basetable$age <- as.numeric(year(Sys.Date()) - year(basetable$Birthday))
+basetable$Birthday <- ymd(basetable$Birthday)
+basetable$age <- as.integer(floor(as.numeric(basetable$Year) - (as.numeric(format(basetable$Birthday, format = "%Y")))))
+basetable$age[basetable$age > 100] <- NA
 #drop birthday
 drop <- c("Birthday")
 basetable = basetable[,!(names(basetable) %in% drop)]
 ```
-
 
 ```{r}
 basetable %>%
@@ -70,16 +81,27 @@ basetable %>%
 ```
 
 ```{r}
+basetable$success <- as.factor(basetable$success)
+```
+
+```{r}
 #drop columns that are not of any use
-drop <- c("Rider", "Pos", "Rider_Country", "Time", "UCI", "VAR32")
+drop <- c("Rider", "Pos", "Rider_Country", "Time", "UCI", "VAR32", "podium", "Team.x", "podium", "Year", "Price")
 basetable = basetable[,!(names(basetable) %in% drop)]
 
 
 #Time is dropped because this is highly correlated with position and thus success.
 #Rider_Country is dropped but can be changed to dummy. However, I did not do this now to keep dimensionality low.
 #UCI is dropped because this is highly correlated with success.
-#VAR32 contains years, this does not seem usefull in analysis
+#VAR32 contains years, this does not seem useful in analysis
+#podium is dropped but could be added again in prescriptive part
 ```
+
+```{r}
+# Inspect class imbalance
+table(basetable$success)
+```
+
 
 Next Steps:
 This basetable can be passed on to the modelling phase easily. My reasoning was that the predictive model should be kept on the individual level. The goal is to predict whether the driver will have a successful race. Therefore, the table should not be grouped on driver or year. Success is defined as: 'did the driver end in the point at the end of this race?' We do not define an explicit time window, however, as one can reason: the dependent period is during the race and the independent period is after the driver has finished.
@@ -91,3 +113,157 @@ Objective: Max(points per team)
           
 This should be done by aggregating on team and on race, maybe look at the yearly scores as well.
 Note: 'Team.x', 'Race_ID' and 'Year' are not dropped because it is necessary for the prescriptive part. For the predictive model they should be dropped.
+
+```{r}
+# create idicators randomize order of indicators
+allind <- sample(x = 1:nrow(basetable), size = nrow(basetable))
+
+# split in two equal parts
+trainind <- allind[1:round(length(allind) * 0.5)]
+testind <- allind[(round(length(allind) * (0.5)) + 1):length(allind)]
+
+# actual subsetting
+train <- basetable[trainind, ]
+test <- basetable[testind, ]
+```
+
+```{r}
+# Inspect class imbalance
+table(train$success)
+```
+
+
+```{r}
+##OVERSAMPLING##
+
+# Get indices of each group
+success <- which(train$success == "1")
+non_success <- which(train$success == "0")
+
+# See how many instances we would want to have equal number
+# as majority_class
+n_desired <- length(success)
+
+resampled_non_success <- sample(x = non_success, size = n_desired,
+    replace = TRUE)
+
+print(resampled_non_success)
+```
+
+```{r}
+# Combine into one large data set
+train <- train[c(resampled_non_success, success),]
+table(train$success)
+```
+
+
+```{r}
+#Model building:
+p_load(h2o)
+```
+
+```{r}
+#h2o.ls()
+#h2o.removeAll()
+#h2o.ls()
+```
+
+```{r}
+h2o.init(max_mem_size = "7G")
+```
+
+```{r}
+train_h2o<-as.h2o(train)
+test_h2o<-as.h2o(test)
+```
+
+```{r}
+y <- "success"
+x <- setdiff(names(train_h2o), y)
+```
+
+```{r}
+#xgboost
+my_xgb <- h2o.xgboost(x = x,
+                           y = y,
+                           training_frame = train_h2o,
+                           validation_frame = test_h2o,
+                           booster = "dart",
+                           normalize_type = "tree",
+                           nfolds = 5,
+                           #fold_column = "group",
+                           keep_cross_validation_predictions = TRUE,
+                           seed = 5)
+ 
+#naive bayes
+my_nb <- h2o.naiveBayes(x = x,
+                          y = y,
+                          training_frame = train_h2o,
+                          laplace = 0,
+                          nfolds = 5,
+                          #fold_column = "group",
+                          keep_cross_validation_predictions = TRUE,
+                          seed = 5)
+
+# Train & Cross-validate a RF (REACHES CAPACITY EVERY TIME)
+my_rf <- h2o.randomForest(x = x,
+                          y = y,
+                          training_frame = train_h2o,
+                          nfolds = 5,
+                          #fold_column = "group",
+                          keep_cross_validation_predictions = TRUE,
+                          seed = 5)
+
+# Train & Cross-validate a LR
+my_lr <- h2o.glm(x = x,
+                 y = y,
+                 training_frame = train_h2o,
+                 family = c("binomial"),
+                 nfolds = 5,
+                 #fold_column = "group",
+                 keep_cross_validation_predictions = TRUE,
+                 seed = 5)
+```
+
+```{r}
+# Train a stacked ensemble using the XGB and NB above
+ensemble <- h2o.stackedEnsemble(x = x,
+                                y = y,
+                                metalearner_algorithm="xgboost",
+                                training_frame = train_h2o,
+                                base_models = list(my_xgb, my_nb, my_rf, my_lr))
+```
+
+```{r}
+# Eval ensemble performance on a test set
+perf <- h2o.performance(ensemble, newdata = test_h2o)
+```
+
+```{r}
+# Compare to base learner performance on the test set
+perf_gbm_test <- h2o.performance(my_xgb, newdata = test_h2o)
+perf_nb_test <- h2o.performance(my_nb, newdata = test_h2o)
+perf_lr_test <- h2o.performance(my_lr, newdata = test_h2o)
+perf_rf_test <- h2o.performance(my_rf, newdata = test_h2o)
+baselearner_best_auc_test <- max(h2o.auc(perf_gbm_test), h2o.auc(perf_nb_test), h2o.auc(perf_lr_test), h2o.auc(perf_rf_test))
+ensemble_auc_test <- h2o.auc(perf)
+print(sprintf("Best Base-learner Test AUC:  %s", baselearner_best_auc_test))
+print(sprintf("Ensemble Test AUC:  %s", ensemble_auc_test))
+
+```
+
+```{r}
+# predict
+preds <- h2o.predict(ensemble, test_h2o)
+mean(preds)
+preds <- preds[,3]
+preds = as.data.frame(preds)
+colnames(preds) = c("prob_success")
+preds <- cbind(preds)
+preds[,1]
+```
+
+```{r}
+
+```
+
