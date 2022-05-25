@@ -1,15 +1,5 @@
----
-title: "R Notebook"
-output: html_notebook
----
-
-Predictive Modelling Part
-
-```{r}
 rm(list = ls())
-```
 
-```{r}
 #install packages
 if (!require("pacman")) install.packages("pacman")
 require("pacman", character.only = TRUE, quietly = TRUE)
@@ -18,19 +8,13 @@ library("readxl")
 p_load(lubridate)
 library('stringr')
 set.seed(123)
-```
 
-```{r}
 first_cycling_data <- read.csv("Races_WITHindex.csv", header = TRUE)
 pro_cycling_data <- read_excel("RiderData.xlsx")
-```
 
-```{r}
 #impute missing UCIs with 0 as missing values means that the driver finished outside of the points and thus did not earn any
 first_cycling_data$UCI[is.na(first_cycling_data$UCI)] <- 0
-```
 
-```{r}
 #merge on name and team (because what if a rider switches teams?)
 #merge Given Name and Family name to one column: Rider (necessary for merge)
 pro_cycling_data$Rider <- str_c(pro_cycling_data$`Family Name`, ' ', pro_cycling_data$`Given Name`)
@@ -38,31 +22,21 @@ pro_cycling_data$Rider <- str_c(pro_cycling_data$`Family Name`, ' ', pro_cycling
 # merge two data frames by ID
 basetable <- merge(first_cycling_data, pro_cycling_data,by="Rider")
 
-```
-
-```{r}
 #transform position column to numbers
 basetable$Pos <- as.integer(basetable$Pos)
 basetable$Pos[is.na(basetable$Pos)] <- 100 #give the empty values a random number that does NOT indicate success (NA means DNF or DNS)
-```
 
-```{r}
 #check missing values
 colSums(is.na(basetable))
 #Var_9 has a high amount of missing values, as well as VAR_16, so we will drop those
-```
 
-
-```{r}
 #drop columns that are not of any use
 drop <- c("X.x", "Rider_ID", "Team_ID", "ID", "Family Name", "Given Name", "Name", "Team.y", "Region", "ID2", "VAR10", "VAR9", "VAR16",
           "VAR25", "VAR26", "VAR23", "VAR24", "VAR29", "VAR27", "VAR28", "VAR21", "VAR22", "VAR20", "X.y", "VAR2", "VAR3",
           "VAR5", "VAR6", "VAR14", "VAR15", "Type", "VAR12", "VAR13", "VAR18", "Price", "VAR19", "VAR17", "VAR8", "VAR11", "VAR30",
           "VAR31", "Unnamed..1", "Icon")
 basetable = basetable[,!(names(basetable) %in% drop)]
-```
 
-```{r}
 #get age of rider
 basetable$Birthday <- ymd(basetable$Birthday)
 basetable$age <- as.integer(floor(as.numeric(basetable$Year) - (as.numeric(format(basetable$Birthday, format = "%Y")))))
@@ -70,14 +44,7 @@ basetable$age[basetable$age > 100] <- NA
 #drop birthday
 drop <- c("Birthday")
 basetable = basetable[,!(names(basetable) %in% drop)]
-```
 
-```{r}
-basetable %>%
-    glimpse()
-```
-
-```{r}
 #As a tryout give riders points based on the F1 system
 #If he rider comes first, he gets 10 points. If he is 2nd, 9 points
 #All the way down to 1 point for place 10 till 60
@@ -85,19 +52,17 @@ basetable %>%
 #Can be altered to be more forgiving
 basetable$points <- ifelse(basetable$Pos == 1, 10, 
                            ifelse(basetable$Pos == 2, 9,
-                              ifelse(basetable$Pos == 3, 8,
-                                ifelse(basetable$Pos == 4, 7,
-                                  ifelse(basetable$Pos == 5, 6,
-                                    ifelse(basetable$Pos == 6, 5,
-                                           ifelse(basetable$Pos == 7, 4,
-                                                  ifelse(basetable$Pos == 8, 3,
-                                                         ifelse(basetable$Pos == 9, 2,
-                                  ifelse(basetable$Pos >= 10 && basetable$Pos <= 60, 1, 0)
-                           )
-))))))))
-```
+                                  ifelse(basetable$Pos == 3, 8,
+                                         ifelse(basetable$Pos == 4, 7,
+                                                ifelse(basetable$Pos == 5, 6,
+                                                       ifelse(basetable$Pos == 6, 5,
+                                                              ifelse(basetable$Pos == 7, 4,
+                                                                     ifelse(basetable$Pos == 8, 3,
+                                                                            ifelse(basetable$Pos == 9, 2,
+                                                                                   ifelse(basetable$Pos >= 10 && basetable$Pos <= 60, 1, 0)
+                                                                            )
+                                                                     ))))))))
 
-```{r}
 #Define that a driver has a specialty in a specific category if he has a score in that category above 75
 #Exact cutoff also up for discussion, mcategories have a range between 50 and 85
 #https://web.cyanide-studio.com/games/cycling/2021/pcm/guide/basics-specialisations/
@@ -114,11 +79,7 @@ basetable$endurance_driver <- ifelse(basetable$ENDURANCE >= 75,1,0)
 basetable$recup_driver <- ifelse(basetable$RECUP >= 75,1,0)
 basetable$hill_driver <- ifelse(basetable$HILL >= 75,1,0)
 basetable$attack_driver <- ifelse(basetable$ATTACK >= 75,1,0)
-```
 
-```{r}
-#Compute team scores on different aspects per race (quantifying team selection)
-#Like this we get per row the specifics of a team, per race, per year
 team_scores_per_race <-basetable %>%
   group_by(Year, Race_ID, Team.x) %>%
   summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
@@ -133,40 +94,30 @@ team_scores_per_race <-basetable %>%
             nr_cobbles_drivers = sum(cobbles_driver), nr_tt_drivers = sum(tt_driver), nr_prologue_drivers = sum(prologue_driver),
             nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
               sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
-            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age))
+            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age)
+            #top3_finishes=count(Pos<=3)
+            )
 
-```
-
-```{r}
 hist(team_scores_per_race$team_points)
-```
-```{r}
-team_scores_per_race %>%
-    glimpse()
-```
+
+##Extra features##
+#Result related
 
 
-```{r}
+#Others
+
+
 #success is defined as when the team scores at least 10 points
 team_scores_per_race$success <- ifelse(team_scores_per_race$team_points >= 10, 1, 0)
 team_scores_per_race$success <- as.factor(team_scores_per_race$success)
-```
 
-Maybe here the table should be written to csv.
-
-```{r}
 #drop columns that are not of any use
 drop <- c("Team.x", "Year", "team_points", "Race_ID")
 team_scores_per_race = team_scores_per_race[,!(names(team_scores_per_race) %in% drop)]
-```
 
-```{r}
 # Inspect class imbalance
 table(team_scores_per_race$success)
-```
 
-
-```{r}
 # create indicators randomize order of indicators
 allind <- sample(x = 1:nrow(team_scores_per_race), size = nrow(team_scores_per_race))
 
@@ -177,15 +128,10 @@ testind <- allind[(round(length(allind) * (0.5)) + 1):length(allind)]
 # actual subsetting
 train <- team_scores_per_race[trainind, ]
 test <- team_scores_per_race[testind, ]
-```
 
-```{r}
 # Inspect class imbalance
 table(train$success)
-```
 
-
-```{r}
 ##OVERSAMPLING##
 
 # Get indices of each group
@@ -197,44 +143,24 @@ fail <- which(train$success == "0")
 n_desired <- length(fail)
 
 resampled_success <- sample(x = success, size = n_desired,
-    replace = TRUE)
+                            replace = TRUE)
 
 print(resampled_success)
-```
 
-```{r}
 # Combine into one large data set
 train <- train[c(resampled_success, fail),]
 table(train$success)
-```
 
-
-```{r}
 #Model building:
 p_load(h2o)
-```
-
-```{r}
-# h2o.ls()
-# h2o.removeAll()
-# h2o.ls()
-```
-
-```{r}
 h2o.init(max_mem_size = "7G")
-```
 
-```{r}
 train_h2o<-as.h2o(train)
 test_h2o<-as.h2o(test)
-```
 
-```{r}
 y <- "success"
 x <- setdiff(names(train_h2o), y)
-```
 
-```{r}
 #xgboost
 # my_xgb <- h2o.xgboost(x = x,
 #                            y = y,
@@ -246,16 +172,16 @@ x <- setdiff(names(train_h2o), y)
 #                            #fold_column = "group",
 #                            keep_cross_validation_predictions = TRUE,
 #                            seed = 5)
- 
+
 #naive bayes
 my_nb <- h2o.naiveBayes(x = x,
-                          y = y,
-                          training_frame = train_h2o,
-                          laplace = 0,
-                          nfolds = 5,
-                          #fold_column = "group",
-                          keep_cross_validation_predictions = TRUE,
-                          seed = 5)
+                        y = y,
+                        training_frame = train_h2o,
+                        laplace = 0,
+                        nfolds = 5,
+                        #fold_column = "group",
+                        keep_cross_validation_predictions = TRUE,
+                        seed = 5)
 
 # Train & Cross-validate a RF (REACHES CAPACITY EVERY TIME)
 my_rf <- h2o.randomForest(x = x,
@@ -275,24 +201,18 @@ my_lr <- h2o.glm(x = x,
                  #fold_column = "group",
                  keep_cross_validation_predictions = TRUE,
                  seed = 5)
-```
 
-```{r}
 # Train a stacked ensemble using the models above
 ensemble <- h2o.stackedEnsemble(x = x,
                                 y = y,
                                 metalearner_algorithm="randomforest",
                                 training_frame = train_h2o,
                                 base_models = list(#my_xgb, 
-                                                    my_nb, my_rf, my_lr))
-```
+                                  my_nb, my_rf, my_lr))
 
-```{r}
 # Eval ensemble performance on a test set
 perf <- h2o.performance(ensemble, newdata = test_h2o)
-```
 
-```{r}
 # Compare to base learner performance on the test set
 #perf_gbm_test <- h2o.performance(my_xgb, newdata = test_h2o)
 perf_nb_test <- h2o.performance(my_nb, newdata = test_h2o)
@@ -304,9 +224,6 @@ ensemble_auc_test <- h2o.auc(perf)
 print(sprintf("Best Base-learner Test AUC:  %s", baselearner_best_auc_test))
 print(sprintf("Ensemble Test AUC:  %s", ensemble_auc_test))
 
-```
-
-```{r}
 # predict
 preds <- h2o.predict(ensemble, test_h2o)
 mean(preds)
@@ -315,9 +232,3 @@ preds = as.data.frame(preds)
 colnames(preds) = c("prob_success")
 preds <- cbind(preds)
 preds[,1]
-```
-
-```{r}
-
-```
-
