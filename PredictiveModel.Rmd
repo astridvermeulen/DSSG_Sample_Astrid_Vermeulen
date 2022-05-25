@@ -33,7 +33,7 @@ first_cycling_data$UCI[is.na(first_cycling_data$UCI)] <- 0
 ```{r}
 #merge on name and team (because what if a rider switches teams?)
 #merge Given Name and Family name to one column: Rider (necessary for merge)
-pro_cycling_data$Rider <- str_c(pro_cycling_data$`Given Name`, ' ', pro_cycling_data$`Family Name`)
+pro_cycling_data$Rider <- str_c(pro_cycling_data$`Family Name`, ' ', pro_cycling_data$`Given Name`)
 
 # merge two data frames by ID
 basetable <- merge(first_cycling_data, pro_cycling_data,by="Rider")
@@ -41,12 +41,9 @@ basetable <- merge(first_cycling_data, pro_cycling_data,by="Rider")
 ```
 
 ```{r}
-#define succes on team basis: annually more (or equal) points than the previous year = succes?
-basetable$Pos <- ifelse(basetable$Pos == 'DNF', 100, basetable$Pos)
-#basetable$Pos <- as.integer(basetable$Pos)
-
-basetable$success <- ifelse(basetable$Pos <= 60, 1, 0)
-basetable$podium <- ifelse(basetable$Pos <= 3, 1, 0)
+#transform position column to numbers
+basetable$Pos <- as.integer(basetable$Pos)
+basetable$Pos[is.na(basetable$Pos)] <- 100 #give the empty values a random number that does NOT indicate success (NA means DNF or DNS)
 ```
 
 ```{r}
@@ -59,9 +56,9 @@ colSums(is.na(basetable))
 ```{r}
 #drop columns that are not of any use
 drop <- c("X.x", "Rider_ID", "Team_ID", "ID", "Family Name", "Given Name", "Name", "Team.y", "Region", "ID2", "VAR10", "VAR9", "VAR16",
-          "VAR25", "VAR26", "VAR23", "Team.x", "VAR24", "VAR29", "VAR27", "VAR28", "VAR21", "VAR22", "VAR20", "X.y", "VAR2", "VAR3",
+          "VAR25", "VAR26", "VAR23", "VAR24", "VAR29", "VAR27", "VAR28", "VAR21", "VAR22", "VAR20", "X.y", "VAR2", "VAR3",
           "VAR5", "VAR6", "VAR14", "VAR15", "Type", "VAR12", "VAR13", "VAR18", "Price", "VAR19", "VAR17", "VAR8", "VAR11", "VAR30",
-          "VAR31")
+          "VAR31", "Unnamed..1", "Icon")
 basetable = basetable[,!(names(basetable) %in% drop)]
 ```
 
@@ -81,50 +78,105 @@ basetable %>%
 ```
 
 ```{r}
-basetable$success <- as.factor(basetable$success)
+#As a tryout give riders points based on the F1 system
+#If he rider comes first, he gets 10 points. If he is 2nd, 9 points
+#All the way down to 1 point for place 10 till 60
+#If you finish outside of top 60, 0 points
+#Can be altered to be more forgiving
+basetable$points <- ifelse(basetable$Pos == 1, 10, 
+                           ifelse(basetable$Pos == 2, 9,
+                              ifelse(basetable$Pos == 3, 8,
+                                ifelse(basetable$Pos == 4, 7,
+                                  ifelse(basetable$Pos == 5, 6,
+                                    ifelse(basetable$Pos == 6, 5,
+                                           ifelse(basetable$Pos == 7, 4,
+                                                  ifelse(basetable$Pos == 8, 3,
+                                                         ifelse(basetable$Pos == 9, 2,
+                                  ifelse(basetable$Pos >= 10 && basetable$Pos <= 60, 1, 0)
+                           )
+))))))))
 ```
 
 ```{r}
+#Define that a driver has a specialty in a specific category if he has a score in that category above 75
+#Exact cutoff also up for discussion, mcategories have a range between 50 and 85
+#https://web.cyanide-studio.com/games/cycling/2021/pcm/guide/basics-specialisations/
+basetable$flat_driver <- ifelse(basetable$FLAT >= 75,1,0)
+basetable$mountain_driver <- ifelse(basetable$MOUNTAIN >= 75,1,0)
+basetable$downhill_driver <- ifelse(basetable$DOWNHILL >= 75,1,0)
+basetable$cobbles_driver <- ifelse(basetable$COBBLES >= 75,1,0)
+basetable$tt_driver <- ifelse(basetable$TT >= 75,1,0)
+basetable$prologue_driver <- ifelse(basetable$PROLOGUE >= 75,1,0)
+basetable$sprint_driver <- ifelse(basetable$SPRINT >= 75,1,0)
+basetable$acceleration_driver <- ifelse(basetable$ACCELERATION >= 75,1,0)
+basetable$resistance_driver <- ifelse(basetable$RESISTANCE >= 75,1,0)
+basetable$endurance_driver <- ifelse(basetable$ENDURANCE >= 75,1,0)
+basetable$recup_driver <- ifelse(basetable$RECUP >= 75,1,0)
+basetable$hill_driver <- ifelse(basetable$HILL >= 75,1,0)
+basetable$attack_driver <- ifelse(basetable$ATTACK >= 75,1,0)
+```
+
+```{r}
+#Compute team scores on different aspects per race (quantifying team selection)
+#Like this we get per row the specifics of a team, per race, per year
+team_scores_per_race <-basetable %>%
+  group_by(Year, Race_ID, Team.x) %>%
+  summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
+            team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
+            team_score_cobbles = sum(COBBLES), team_score_tt = sum(TT), team_score_prologue = sum(PROLOGUE),
+            team_score_sprint = sum(SPRINT), team_score_acceleration = sum(ACCELERATION), team_score_endurance = sum(ENDURANCE),
+            team_score_resistance = sum(RESISTANCE), team_score_recup = sum(RECUP), team_score_hill = sum(HILL),
+            team_score_attack = sum(ATTACK), 
+            avg_team_size = mean(Size), avg_team_weight = mean(Weight),
+            nr_drivers = n_distinct(Rider),
+            nr_flat_drivers = sum(flat_driver), nr_mountain_drivers = sum(mountain_driver), nr_downhill_drivers = sum(downhill_driver),
+            nr_cobbles_drivers = sum(cobbles_driver), nr_tt_drivers = sum(tt_driver), nr_prologue_drivers = sum(prologue_driver),
+            nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
+              sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
+            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age))
+
+```
+
+```{r}
+hist(team_scores_per_race$team_points)
+```
+```{r}
+team_scores_per_race %>%
+    glimpse()
+```
+
+
+```{r}
+#success is defined as when the team scores at least 10 points
+team_scores_per_race$success <- ifelse(team_scores_per_race$team_points >= 10, 1, 0)
+team_scores_per_race$success <- as.factor(team_scores_per_race$success)
+```
+
+Maybe here the table should be written to csv.
+
+```{r}
 #drop columns that are not of any use
-drop <- c("Rider", "Pos", "Rider_Country", "Time", "UCI", "VAR32", "podium", "Team.x", "podium", "Year", "Price")
-basetable = basetable[,!(names(basetable) %in% drop)]
-
-
-#Time is dropped because this is highly correlated with position and thus success.
-#Rider_Country is dropped but can be changed to dummy. However, I did not do this now to keep dimensionality low.
-#UCI is dropped because this is highly correlated with success.
-#VAR32 contains years, this does not seem useful in analysis
-#podium is dropped but could be added again in prescriptive part
+drop <- c("Team.x", "Year", "team_points", "Race_ID")
+team_scores_per_race = team_scores_per_race[,!(names(team_scores_per_race) %in% drop)]
 ```
 
 ```{r}
 # Inspect class imbalance
-table(basetable$success)
+table(team_scores_per_race$success)
 ```
 
 
-Next Steps:
-This basetable can be passed on to the modelling phase easily. My reasoning was that the predictive model should be kept on the individual level. The goal is to predict whether the driver will have a successful race. Therefore, the table should not be grouped on driver or year. Success is defined as: 'did the driver end in the point at the end of this race?' We do not define an explicit time window, however, as one can reason: the dependent period is during the race and the independent period is after the driver has finished.
-
-The predictive model is used to predict success. These outcomes will be passed on to the Prescriptive part, which has the objective to maximize success on team basis, meaning: as many drivers as possible finish with points. More specifically:
-
-Objective: Max(points per team)
-          with points = success. This indicates that this problem will be solved using integer programming.
-          
-This should be done by aggregating on team and on race, maybe look at the yearly scores as well.
-Note: 'Team.x', 'Race_ID' and 'Year' are not dropped because it is necessary for the prescriptive part. For the predictive model they should be dropped.
-
 ```{r}
-# create idicators randomize order of indicators
-allind <- sample(x = 1:nrow(basetable), size = nrow(basetable))
+# create indicators randomize order of indicators
+allind <- sample(x = 1:nrow(team_scores_per_race), size = nrow(team_scores_per_race))
 
 # split in two equal parts
 trainind <- allind[1:round(length(allind) * 0.5)]
 testind <- allind[(round(length(allind) * (0.5)) + 1):length(allind)]
 
 # actual subsetting
-train <- basetable[trainind, ]
-test <- basetable[testind, ]
+train <- team_scores_per_race[trainind, ]
+test <- team_scores_per_race[testind, ]
 ```
 
 ```{r}
@@ -138,21 +190,21 @@ table(train$success)
 
 # Get indices of each group
 success <- which(train$success == "1")
-non_success <- which(train$success == "0")
+fail <- which(train$success == "0")
 
 # See how many instances we would want to have equal number
 # as majority_class
-n_desired <- length(success)
+n_desired <- length(fail)
 
-resampled_non_success <- sample(x = non_success, size = n_desired,
+resampled_success <- sample(x = success, size = n_desired,
     replace = TRUE)
 
-print(resampled_non_success)
+print(resampled_success)
 ```
 
 ```{r}
 # Combine into one large data set
-train <- train[c(resampled_non_success, success),]
+train <- train[c(resampled_success, fail),]
 table(train$success)
 ```
 
@@ -226,7 +278,7 @@ my_lr <- h2o.glm(x = x,
 ```
 
 ```{r}
-# Train a stacked ensemble using the XGB and NB above
+# Train a stacked ensemble using the models above
 ensemble <- h2o.stackedEnsemble(x = x,
                                 y = y,
                                 metalearner_algorithm="xgboost",
