@@ -80,8 +80,18 @@ basetable$recup_driver <- ifelse(basetable$RECUP >= 75,1,0)
 basetable$hill_driver <- ifelse(basetable$HILL >= 75,1,0)
 basetable$attack_driver <- ifelse(basetable$ATTACK >= 75,1,0)
 
+#Everything gets grouped by Race_ID here, but a Race_ID can sometimes have multiple stages
+#If a Race_ID is just a one day race, stage column is 0
+#Make a new Race_ID_stage , indicating the race id and stage in one column
+basetable <- basetable %>%
+  unite(Race_ID_Stage, Race_ID, Stage,
+        remove = FALSE,
+        sep = '_') %>%
+  # Replace ', ' with '' if it is at the end of the line
+  mutate(Race_ID_Stage = gsub(', $', '', Race_ID_Stage))
+
 team_scores_per_race <-basetable %>%
-  group_by(Year, Race_ID, Team.x) %>%
+  group_by(Year, Race_ID_Stage, Team.x) %>%
   summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
             team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
             team_score_cobbles = sum(COBBLES), team_score_tt = sum(TT), team_score_prologue = sum(PROLOGUE),
@@ -94,9 +104,36 @@ team_scores_per_race <-basetable %>%
             nr_cobbles_drivers = sum(cobbles_driver), nr_tt_drivers = sum(tt_driver), nr_prologue_drivers = sum(prologue_driver),
             nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
               sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
-            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age)
-            #top3_finishes=count(Pos<=3)
+            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age),
+            top20_finishes = sum(Pos <= 20), top10_finishes = sum(Pos <= 10), top5_finishes = sum(Pos <= 5), top3_finishes = sum(Pos <= 3)
             )
+
+#Assign a category to each race, in line with the rider categories (done with help of stage_profiles in first cycling api)
+#For the single day races we assign the category by hand
+ids_single <- c("4_0", "7_0", "5_0", "8_0", "9_0", "11_0", "59_0", "58_0", "24_0", "47_0", "10_0", "1988_0", "20_0", "22_0", "1172_0", "53_0", "54_0", "75_0", "35_0", "40_0")
+cats_single <- c("Flat", "Cobble", "Cobble", "Cobble", "Hill", "Hill", "Hill_UHF", "Hill", "Hill", "Cobble", "Hill_UHF", "Flat", "Flat", "Hill", "Hill", "Cobble", "Hill_UHF", "Cobble", "Hill", "Cobble")
+race_cats_single <- data.frame(ids_single, cats_single)
+race_cats_single <- race_cats_single %>%
+  rename(Race_ID_Stage = ids_single, Race_Category = cats_single)
+
+race_categories <- read.csv("race_categories.csv", header = TRUE)
+unique(race_categories$Category)
+
+#Translate the danish names we extracted from FCAPI
+#UHF = up hill finish
+race_categories <- race_categories %>% 
+                        mutate(Race_Category = case_when(Category == "Flatt"   ~ "Flat", Category == "Smaakupert-MF" ~ "Hill_UHF",
+                                  Category == "Smaakupert"   ~ "Hill", Category == "Fjell" ~ "Mountain",
+                                  Category == "Fjell-MF"   ~ "Mountain_UHF", Category == "Tempo" ~ "TimeTrial",
+                                  Category == "Bakketempo"   ~ "TimeTrial", Category == "Brosten" ~ "Cobble",TRUE ~ "TimeTrial"))
+race_categories <- race_categories %>%
+  unite(Race_ID_Stage, Race_ID, Stage,
+        remove = FALSE,
+        sep = '_') %>%
+  # Replace ', ' with '' if it is at the end of the line
+  mutate(Race_ID_Stage = gsub(', $', '', Race_ID_Stage))
+
+
 
 hist(team_scores_per_race$team_points)
 
@@ -112,7 +149,7 @@ team_scores_per_race$success <- ifelse(team_scores_per_race$team_points >= 10, 1
 team_scores_per_race$success <- as.factor(team_scores_per_race$success)
 
 #drop columns that are not of any use
-drop <- c("Team.x", "Year", "team_points", "Race_ID")
+drop <- c("Team.x", "Year", "team_points", "Race_ID", "Race_ID_Stage", "Stage")
 team_scores_per_race = team_scores_per_race[,!(names(team_scores_per_race) %in% drop)]
 
 # Inspect class imbalance
@@ -205,7 +242,7 @@ my_lr <- h2o.glm(x = x,
 # Train a stacked ensemble using the models above
 ensemble <- h2o.stackedEnsemble(x = x,
                                 y = y,
-                                metalearner_algorithm="randomforest",
+                                metalearner_algorithm="naivebayes",
                                 training_frame = train_h2o,
                                 base_models = list(#my_xgb, 
                                   my_nb, my_rf, my_lr))
