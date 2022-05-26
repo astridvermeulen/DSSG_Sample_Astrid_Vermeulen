@@ -87,7 +87,7 @@ basetable <- basetable %>%
   unite(Race_ID_Stage, Race_ID, Stage,
         remove = FALSE,
         sep = '_') %>%
-  # Replace ', ' with '' if it is at the end of the line
+  # Replace '_' with '' if it is at the end of the line
   mutate(Race_ID_Stage = gsub(', $', '', Race_ID_Stage))
 
 team_scores_per_race <-basetable %>%
@@ -118,7 +118,6 @@ race_cats_single <- race_cats_single %>%
 
 race_categories <- read.csv("race_categories.csv", header = TRUE)
 unique(race_categories$Category)
-
 #Translate the danish names we extracted from FCAPI
 #UHF = up hill finish
 race_categories <- race_categories %>% 
@@ -133,6 +132,7 @@ race_categories <- race_categories %>%
   # Replace ', ' with '' if it is at the end of the line
   mutate(Race_ID_Stage = gsub(', $', '', Race_ID_Stage))
 
+#Join the categories to the team_scores df
 
 
 hist(team_scores_per_race$team_points)
