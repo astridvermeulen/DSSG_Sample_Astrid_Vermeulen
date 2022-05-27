@@ -8,6 +8,7 @@ library("readxl")
 p_load(lubridate)
 library('stringr')
 set.seed(123)
+p_load(dummy)
 
 first_cycling_data <- read.csv("Races_WITHindex.csv", header = TRUE)
 pro_cycling_data <- read_excel("RiderData.xlsx")
@@ -82,7 +83,7 @@ basetable$attack_driver <- ifelse(basetable$ATTACK >= 75,1,0)
 
 #Everything gets grouped by Race_ID here, but a Race_ID can sometimes have multiple stages
 #If a Race_ID is just a one day race, stage column is 0
-#Make a new Race_ID_stage , indicating the race id and stage in one column
+#Make a new Race_ID_Stage , indicating the race id and stage in one column
 basetable <- basetable %>%
   unite(Race_ID_Stage, Race_ID, Stage,
         remove = FALSE,
@@ -90,6 +91,9 @@ basetable <- basetable %>%
   # Replace '_' with '' if it is at the end of the line
   mutate(Race_ID_Stage = gsub(', $', '', Race_ID_Stage))
 
+#Aggregate everything so that one row equals one team per race
+#Variables inlcude team scores on different attributes, number of drivers with certain attributes
+#Team points in the race and amount of top_X finishes per race
 team_scores_per_race <-basetable %>%
   group_by(Year, Race_ID_Stage, Team.x) %>%
   summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
@@ -108,7 +112,8 @@ team_scores_per_race <-basetable %>%
             top20_finishes = sum(Pos <= 20), top10_finishes = sum(Pos <= 10), top5_finishes = sum(Pos <= 5), top3_finishes = sum(Pos <= 3)
             )
 
-#Assign a category to each race, in line with the rider categories (done with help of stage_profiles in first cycling api)
+#Assign a category to each race, in line with the rider categories (done with help of stage_profiles in first cycling api and the stage profile icons on the site of firstcycling)
+#In the html code you can see the name for the icon, that indicated the race category
 #For the single day races we assign the category by hand
 ids_single <- c("4_0", "7_0", "5_0", "8_0", "9_0", "11_0", "59_0", "58_0", "24_0", "47_0", "10_0", "1988_0", "20_0", "22_0", "1172_0", "53_0", "54_0", "75_0", "35_0", "40_0")
 cats_single <- c("Flat", "Cobble", "Cobble", "Cobble", "Hill", "Hill", "Hill_UHF", "Hill", "Hill", "Cobble", "Hill_UHF", "Flat", "Flat", "Hill", "Hill", "Cobble", "Hill_UHF", "Cobble", "Hill", "Cobble")
@@ -116,15 +121,17 @@ race_cats_single <- data.frame(ids_single, cats_single)
 race_cats_single <- race_cats_single %>%
   rename(Race_ID_Stage = ids_single, Race_Category = cats_single)
 
+#For the races with multiple stages we extracted the profiles from the html response, with the help of python (see Cycling API.ipynb)
 race_categories <- read.csv("race_categories.csv", header = TRUE)
 unique(race_categories$Category)
-#Translate the danish names we extracted from FCAPI
+#Translate the danish names we extracted from FC API
 #UHF = up hill finish
 race_categories <- race_categories %>% 
                         mutate(Race_Category = case_when(Category == "Flatt"   ~ "Flat", Category == "Smaakupert-MF" ~ "Hill_UHF",
                                   Category == "Smaakupert"   ~ "Hill", Category == "Fjell" ~ "Mountain",
                                   Category == "Fjell-MF"   ~ "Mountain_UHF", Category == "Tempo" ~ "TimeTrial",
                                   Category == "Bakketempo"   ~ "TimeTrial", Category == "Brosten" ~ "Cobble",TRUE ~ "TimeTrial"))
+#Make the same Race_ID_Stage as before
 race_categories <- race_categories %>%
   unite(Race_ID_Stage, Race_ID, Stage,
         remove = FALSE,
@@ -132,17 +139,15 @@ race_categories <- race_categories %>%
   # Replace ', ' with '' if it is at the end of the line
   mutate(Race_ID_Stage = gsub(', $', '', Race_ID_Stage))
 
-#Join the categories to the team_scores df
+drop <- c("Race_ID", "Stage", "Category")
+race_categories = race_categories[,!(names(race_categories) %in% drop)]
 
+#Join the categories to the team_scores df
+team_scores_1 <- merge(team_scores_per_race, race_cats_single,by="Race_ID_Stage")
+team_scores_2 <- merge(team_scores_per_race, race_categories,by= c("Year", "Race_ID_Stage"))
+team_scores_per_race <- rbind(team_scores_1, team_scores_2)
 
 hist(team_scores_per_race$team_points)
-
-##Extra features##
-#Result related
-
-
-#Others
-
 
 #success is defined as when the team scores at least 10 points
 team_scores_per_race$success <- ifelse(team_scores_per_race$team_points >= 10, 1, 0)
@@ -151,6 +156,14 @@ team_scores_per_race$success <- as.factor(team_scores_per_race$success)
 #drop columns that are not of any use
 drop <- c("Team.x", "Year", "team_points", "Race_ID", "Race_ID_Stage", "Stage")
 team_scores_per_race = team_scores_per_race[,!(names(team_scores_per_race) %in% drop)]
+
+#Make dummies from Race_category
+dummies <- dummy(team_scores_per_race["Race_Category"])
+dummies <- dummies %>%
+  mutate(across(everything(), as.factor))
+team_scores_per_race <- team_scores_per_race %>%
+  dplyr::select(!Race_Category) %>%
+  bind_cols(dummies)
 
 # Inspect class imbalance
 table(team_scores_per_race$success)
@@ -198,7 +211,7 @@ test_h2o<-as.h2o(test)
 y <- "success"
 x <- setdiff(names(train_h2o), y)
 
-#xgboost
+#xgboost, h2o does not support xgboost on windows
 # my_xgb <- h2o.xgboost(x = x,
 #                            y = y,
 #                            training_frame = train_h2o,
