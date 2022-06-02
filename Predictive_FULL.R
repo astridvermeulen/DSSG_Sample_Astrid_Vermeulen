@@ -265,7 +265,7 @@ auc_xgb <- AUC::auc(AUC::roc(predxgb, ytest))
 #NB
 
 # Weight according to performance
-finalpredictions <- (auc_rf/(auc_lr + auc_rf + auc_xgb)) * predlr +
+finalpredictions <- (auc_lr/(auc_lr + auc_rf + auc_xgb)) * predlr +
                     (auc_rf/(auc_lr + auc_rf + auc_xgb)) * predrF + 
                     (auc_xgb/(auc_lr + auc_rf + auc_xgb)) * predxgb
 AUC::auc(AUC::roc(finalpredictions, ytest))
