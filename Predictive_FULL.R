@@ -65,7 +65,7 @@ basetable$points <- ifelse(basetable$Pos == 1, 10,
                                                                      ))))))))
 
 #Define that a driver has a specialty in a specific category if he has a score in that category above 75
-#Exact cutoff also up for discussion, mcategories have a range between 50 and 85
+#Exact cutoff also up for discussion, mcategories have a range between 50 and 85 (maybe have a look at the averages)
 #https://web.cyanide-studio.com/games/cycling/2021/pcm/guide/basics-specialisations/
 basetable$flat_driver <- ifelse(basetable$FLAT >= 75,1,0)
 basetable$mountain_driver <- ifelse(basetable$MOUNTAIN >= 75,1,0)
@@ -159,6 +159,9 @@ team_scores_per_race = team_scores_per_race[,!(names(team_scores_per_race) %in% 
 
 #Make dummies from Race_category
 dummies <- dummy(team_scores_per_race["Race_Category"])
+#Set TimeTrial as reference category
+dummies <- dummies %>%
+  dplyr::select(!Race_Category_TimeTrial)
 dummies <- dummies %>%
   mutate(across(everything(), as.factor))
 team_scores_per_race <- team_scores_per_race %>%
@@ -202,83 +205,68 @@ train <- train[c(resampled_success, fail),]
 table(train$success)
 
 #Model building:
-p_load(h2o)
-h2o.init(max_mem_size = "7G")
 
-train_h2o<-as.h2o(train)
-test_h2o<-as.h2o(test)
+##HYBRID ENSEMBLE##
+p_load(hybridEnsemble) #https://rdrr.io/cran/hybridEnsemble/man/hybridEnsemble.html
 
-y <- "success"
-x <- setdiff(names(train_h2o), y)
+ytrain <- train$success
+train <- train[,names(train) != 'success']
+ytest <- test$success
+test <- test[,names(test) != 'success']
 
-#xgboost, h2o does not support xgboost on windows
-# my_xgb <- h2o.xgboost(x = x,
-#                            y = y,
-#                            training_frame = train_h2o,
-#                            validation_frame = test_h2o,
-#                            booster = "dart",
-#                            normalize_type = "tree",
-#                            nfolds = 5,
-#                            #fold_column = "group",
-#                            keep_cross_validation_predictions = TRUE,
-#                            seed = 5)
+hE <- hybridEnsemble(x = train, y= ytrain, algorithms = c("LR", "RF", "AB"
+                                                          #"SV")
+                                                          ),
+                     verbose = TRUE, filter=NULL,
+                     # SV.gamma = 2^-15,
+                     # SV.cost = 2^-5,
+                     # SV.degree=2,
+                     # SV.kernel='radial'
+)
+                     
+predictions <- predict(object = hE, newdata=test, verbose=TRUE)
 
-#naive bayes
-my_nb <- h2o.naiveBayes(x = x,
-                        y = y,
-                        training_frame = train_h2o,
-                        laplace = 0,
-                        nfolds = 5,
-                        #fold_column = "group",
-                        keep_cross_validation_predictions = TRUE,
-                        seed = 5)
+# CVhE <- CVhybridEnsemble(x = train, y= ytrain, algorithms = c("LR", "RF"), verbose = TRUE, filter=NULL)
+# summary(CVhE, stat='median')
+# plot(x=CVhE, ROCcurve = TRUE)
 
-# Train & Cross-validate a RF (REACHES CAPACITY EVERY TIME)
-my_rf <- h2o.randomForest(x = x,
-                          y = y,
-                          training_frame = train_h2o,
-                          nfolds = 5,
-                          #fold_column = "group",
-                          keep_cross_validation_predictions = TRUE,
-                          seed = 5)
 
-# Train & Cross-validate a LR
-my_lr <- h2o.glm(x = x,
-                 y = y,
-                 training_frame = train_h2o,
-                 family = c("binomial"),
-                 nfolds = 5,
-                 #fold_column = "group",
-                 keep_cross_validation_predictions = TRUE,
-                 seed = 5)
+##HETEROGENOUS ENSEMBLE##
+#No optimalisation of parameters done yet
+p_load(randomForest, xgboost, glmnet, AUC)
+#LR
+# On sufficiently small lambda
+logreg <- cv.glmnet(x = data.matrix(train), y = ytrain, family = 'binomial',alpha = 0)
 
-# Train a stacked ensemble using the models above
-ensemble <- h2o.stackedEnsemble(x = x,
-                                y = y,
-                                metalearner_algorithm="naivebayes",
-                                training_frame = train_h2o,
-                                base_models = list(#my_xgb, 
-                                  my_nb, my_rf, my_lr))
+predlr <- predict(logreg, newx = data.matrix(test),
+                       type = "response", s = 0.0003)
 
-# Eval ensemble performance on a test set
-perf <- h2o.performance(ensemble, newdata = test_h2o)
+auc_lr <- AUC::auc(AUC::roc(predlr,ytest))
 
-# Compare to base learner performance on the test set
-#perf_gbm_test <- h2o.performance(my_xgb, newdata = test_h2o)
-perf_nb_test <- h2o.performance(my_nb, newdata = test_h2o)
-perf_lr_test <- h2o.performance(my_lr, newdata = test_h2o)
-perf_rf_test <- h2o.performance(my_rf, newdata = test_h2o)
-baselearner_best_auc_test <- max(#h2o.auc(perf_gbm_test), 
-  h2o.auc(perf_nb_test), h2o.auc(perf_lr_test), h2o.auc(perf_rf_test))
-ensemble_auc_test <- h2o.auc(perf)
-print(sprintf("Best Base-learner Test AUC:  %s", baselearner_best_auc_test))
-print(sprintf("Ensemble Test AUC:  %s", ensemble_auc_test))
+#RF
+rFmodel <- randomForest(x = train, y = ytrain,
+                        ntree = 500, importance = TRUE)
+predrF <- predict(rFmodel, test, type = "prob")[, 2]
+auc_rf <- AUC::auc(AUC::roc(predrF, ytest))
 
-# predict
-preds <- h2o.predict(ensemble, test_h2o)
-mean(preds)
-preds <- preds[,3]
-preds = as.data.frame(preds)
-colnames(preds) = c("prob_success")
-preds <- cbind(preds)
-preds[,1]
+#XGB
+train <- train %>%
+  mutate_if(is.factor, as.character) %>% mutate_if(is.character, as.numeric)
+test <- test %>%
+  mutate_if(is.factor, as.character) %>% mutate_if(is.character, as.numeric)
+# preparing matrices
+dtrain <- xgb.DMatrix(data = as.matrix(train), label = as.numeric(as.character(ytrain)))
+dtest <- xgb.DMatrix(data = as.matrix(test))
+xgb <- xgb.train(data = dtrain,
+                 objective = "binary:logistic", verbose = 0, nrounds=500)
+predxgb <- predict(xgb, dtest)
+auc_xgb <- AUC::auc(AUC::roc(predxgb, ytest))
+
+#NB
+
+# Weight according to performance
+finalpredictions <- (auc_rf/(auc_lr + auc_rf + auc_xgb)) * predlr +
+                    (auc_rf/(auc_lr + auc_rf + auc_xgb)) * predrF + 
+                    (auc_xgb/(auc_lr + auc_rf + auc_xgb)) * predxgb
+AUC::auc(AUC::roc(finalpredictions, ytest))
+
