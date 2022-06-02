@@ -1,0 +1,108 @@
+---
+title: "Prescriptive"
+author: "Lars"
+date: "29-5-2022"
+output: html_document
+---
+
+```{r}
+p_load(tidyverse, GA, Rcpp)
+
+```
+
+```{r}
+# Select team and year 
+team = 'Etixx - Quick Step'
+year = 2016
+```
+
+```{r}
+# Get the whole available team
+team_all <- basetable %>% filter((Team.x == team) & (Year == year)) %>% distinct(Rider,.keep_all = T) %>%     select(Rider,Team.x) # Select the available team members of a given team in a given year
+
+# # test with team of 3 people
+# team_all <- team_all %>% head(3)
+
+team_size <- nrow(team_all) 
+```
+
+```{r}
+#make function to create team scores from rider selection
+summarize_function <- function(team_selection){
+  
+  team_selection_name <- team_all[team_selection == 1,'Rider']
+  
+  team_selection_base <- basetable %>% distinct(Rider ,.keep_all = T) %>% filter(Rider %in% team_selection_name)
+
+  team <- team_selection_base %>%
+    summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
+            team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
+            team_score_cobbles = sum(COBBLES), team_score_tt = sum(TT), team_score_prologue = sum(PROLOGUE),
+            team_score_sprint = sum(SPRINT), team_score_acceleration = sum(ACCELERATION), team_score_endurance = sum(ENDURANCE),
+            team_score_resistance = sum(RESISTANCE), team_score_recup = sum(RECUP), team_score_hill = sum(HILL),
+            team_score_attack = sum(ATTACK), 
+            avg_team_size = mean(Size), avg_team_weight = mean(Weight),
+            nr_drivers = n_distinct(Rider),
+            nr_flat_drivers = sum(flat_driver), nr_mountain_drivers = sum(mountain_driver), nr_downhill_drivers = sum(downhill_driver),
+            nr_cobbles_drivers = sum(cobbles_driver), nr_tt_drivers = sum(tt_driver), nr_prologue_drivers = sum(prologue_driver),
+            nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
+              sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
+            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age))
+  
+#drop columns that are not of any use
+drop <- c("team_points")
+team = team[,!(names(team) %in% drop)]
+
+return(team)
+}
+```
+
+
+```{r}
+# Make evaluate function
+evaluate <- function (x) {
+  
+  input <- get_team_scores(x) # from driver selection, create teamscores df
+  input <- as.h2o(input) # convert df to h2o object
+  
+  # predict
+  preds <- h2o.predict(ensemble, input) # predict prob of succes
+  preds <- as.data.frame(preds) 
+  preds <- unlist(preds[,3]) # third column = prob(1) = prob(success)
+  
+  obj <- preds
+  
+  available_positions = sum(x) # constraint on positions
+
+  
+  if(available_positions > 6) {
+    return(0) # If you violate the constraint = return a very low number
+  } else {
+    return (obj) # Maximization by default
+  }
+}
+
+#Model GA
+result <- ga(type = "binary",
+               fitness = evaluate, 
+               popSize = 150, 
+               maxiter = 100, 
+               pmutation = 0.01, 
+               monitor = FALSE,
+             nBits = 18) # size of available riders
+
+summary(result)
+```
+
+```{r}
+# Get selected drivers 
+rider_selection <- summary(result)$solution %>% as.numeric()
+```
+
+```{r}
+# Show solution
+team_all[rider_selection ==1,]
+```
+
+
+

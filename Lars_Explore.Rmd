@@ -1,0 +1,130 @@
+---
+title: "Lars_explore"
+output: html_document
+---
+ctrl + alt + i to insert a chunk
+
+
+Case study: optimize team succes for Etixx Quick Step in 2016 for a random race (no race characteristics defined yet)
+
+```{r}
+# Select the available team members of a given team in a given year
+# Don't take them from first_cycling data, as there are riders in there who don't appear in pro_cycling_data
+team_all <- basetable %>% filter((Team.x == 'Etixx - Quick Step') & (Year == 2016)) %>% distinct(Rider,.keep_all = T) %>% select(Rider,Team.x)
+team_all
+```
+
+
+```{r}
+team_size <- nrow(team_all)
+```
+
+```{r}
+# create random vector
+set.seed(123)
+team_selection_binary <- sample(c(0,1), replace=TRUE, size=nrow(team_all))
+```
+
+
+
+```{r}
+# show selected riders
+# opletten met dit, doet raar als je boolean vector meegeeft die korter is dan lengte van dataframe
+team_all[team_selection_binary == 1,]
+```
+
+```{r}
+# Select rider names
+team_selection_name <- team_all[team_selection_binary == 1,'Rider']
+```
+
+```{r}
+# Filter basetable on distinct names and get names from team selection. Filtering on distinct names first is necessary, otherwise you get the same riders multiple times. Not what we want. 
+team_selection <- basetable %>% distinct(Rider ,.keep_all = T) %>% filter(Rider %in% team_selection_name)
+```
+
+```{r}
+#Compute team scores for the given team selection
+# Will serve as input to the ensemble
+
+team <- team_selection %>%
+  summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
+            team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
+            team_score_cobbles = sum(COBBLES), team_score_tt = sum(TT), team_score_prologue = sum(PROLOGUE),
+            team_score_sprint = sum(SPRINT), team_score_acceleration = sum(ACCELERATION), team_score_endurance = sum(ENDURANCE),
+            team_score_resistance = sum(RESISTANCE), team_score_recup = sum(RECUP), team_score_hill = sum(HILL),
+            team_score_attack = sum(ATTACK), 
+            avg_team_size = mean(Size), avg_team_weight = mean(Weight),
+            nr_drivers = n_distinct(Rider),
+            nr_flat_drivers = sum(flat_driver), nr_mountain_drivers = sum(mountain_driver), nr_downhill_drivers = sum(downhill_driver),
+            nr_cobbles_drivers = sum(cobbles_driver), nr_tt_drivers = sum(tt_driver), nr_prologue_drivers = sum(prologue_driver),
+            nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
+              sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
+            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age))
+
+#drop columns that are not of any use
+drop <- c("team_points")
+team = team[,!(names(team) %in% drop)]
+team
+```
+
+
+
+```{r}
+# Make function of previous chunks
+# outputs a dataframe with the team scores
+get_team_scores <- function(team_selection_binary){
+  
+  team_selection_name <- team_all[team_selection_binary == 1,'Rider']
+  team_selection <- basetable %>% distinct(Rider ,.keep_all = T) %>% filter(Rider %in% team_selection_name)
+
+  
+  team <- team_selection %>%
+  summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
+            team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
+            team_score_cobbles = sum(COBBLES), team_score_tt = sum(TT), team_score_prologue = sum(PROLOGUE),
+            team_score_sprint = sum(SPRINT), team_score_acceleration = sum(ACCELERATION), team_score_endurance = sum(ENDURANCE),
+            team_score_resistance = sum(RESISTANCE), team_score_recup = sum(RECUP), team_score_hill = sum(HILL),
+            team_score_attack = sum(ATTACK), 
+            avg_team_size = mean(Size), avg_team_weight = mean(Weight),
+            nr_drivers = n_distinct(Rider),
+            nr_flat_drivers = sum(flat_driver), nr_mountain_drivers = sum(mountain_driver), nr_downhill_drivers = sum(downhill_driver),
+            nr_cobbles_drivers = sum(cobbles_driver), nr_tt_drivers = sum(tt_driver), nr_prologue_drivers = sum(prologue_driver),
+            nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
+              sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
+            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age))
+  
+#drop columns that are not of any use
+drop <- c("team_points")
+team = team[,!(names(team) %in% drop)]
+
+return(team)
+}
+```
+
+```{r}
+team <- get_team_scores(team_selection_binary)
+team
+```
+
+
+
+
+```{r}
+input <-as.h2o(team)
+```
+
+```{r}
+# predict
+preds <- h2o.predict(ensemble, input)
+preds <- as.data.frame(preds)
+preds <- unlist(preds[,3])
+```
+```{r}
+class(preds)
+```
+
+
+
+
+
