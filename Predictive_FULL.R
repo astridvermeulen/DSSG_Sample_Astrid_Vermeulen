@@ -207,6 +207,7 @@ table(train$success)
 #Model building:
 
 ##HYBRID ENSEMBLE##
+#Reliable package?
 p_load(hybridEnsemble) #https://rdrr.io/cran/hybridEnsemble/man/hybridEnsemble.html
 
 ytrain <- train$success
@@ -214,6 +215,11 @@ train <- train[,names(train) != 'success']
 ytest <- test$success
 test <- test[,names(test) != 'success']
 
+#GA can also be used as a combination method. Right now it is ; single best, simple mean and authority based weighting
+#SV has difficulties with running (or just takes a really long time)
+#NB throws an error I am not able to fix (don't know where this error is thrown, can't find it in source code)
+#Other available algorithms are KF= Kernel Factory, NN= Bagged Neural Network,
+#RoF= Rotation Forest and KN= Bagged K- Nearest Neighbors
 hE <- hybridEnsemble(x = train, y= ytrain, algorithms = c("LR", "RF", "AB"
                                                           #"SV")
                                                           ),
@@ -227,12 +233,15 @@ hE <- hybridEnsemble(x = train, y= ytrain, algorithms = c("LR", "RF", "AB"
 predictions <- predict(object = hE, newdata=test, verbose=TRUE)
 
 # CVhE <- CVhybridEnsemble(x = train, y= ytrain, algorithms = c("LR", "RF"), verbose = TRUE, filter=NULL)
+#predictions <- predict(object = CVhE, newdata=test, verbose=TRUE)
 # summary(CVhE, stat='median')
 # plot(x=CVhE, ROCcurve = TRUE)
 
 
 ##HETEROGENOUS ENSEMBLE##
 #No optimalisation of parameters done yet
+#Slides mention that ideally 10 classifiers should be used in the ensemble
+#Perform the individual classifier predictions on a validation set, only the final predictions should be done with the test set!
 p_load(randomForest, xgboost, glmnet, AUC)
 #LR
 # On sufficiently small lambda
@@ -250,6 +259,7 @@ predrF <- predict(rFmodel, test, type = "prob")[, 2]
 auc_rf <- AUC::auc(AUC::roc(predrF, ytest))
 
 #XGB
+#Right now with defaults, but xgboost will perform better if hyperparamters are tuned!
 train <- train %>%
   mutate_if(is.factor, as.character) %>% mutate_if(is.character, as.numeric)
 test <- test %>%
