@@ -109,7 +109,7 @@ team_scores_per_race <-basetable %>%
             nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
               sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
             nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age),
-            top20_finishes = sum(Pos <= 20), top10_finishes = sum(Pos <= 10), top5_finishes = sum(Pos <= 5), top3_finishes = sum(Pos <= 3)
+            #top20_finishes = sum(Pos <= 20), top10_finishes = sum(Pos <= 10), top5_finishes = sum(Pos <= 5), top3_finishes = sum(Pos <= 3)
             )
 
 #Assign a category to each race, in line with the rider categories (done with help of stage_profiles in first cycling api and the stage profile icons on the site of firstcycling)
@@ -220,17 +220,17 @@ test <- test[,names(test) != 'success']
 #NB throws an error I am not able to fix (don't know where this error is thrown, can't find it in source code)
 #Other available algorithms are KF= Kernel Factory, NN= Bagged Neural Network,
 #RoF= Rotation Forest and KN= Bagged K- Nearest Neighbors
-hE <- hybridEnsemble(x = train, y= ytrain, algorithms = c("LR", "RF", "AB"
-                                                          #"SV")
-                                                          ),
-                     verbose = TRUE, filter=NULL,
-                     # SV.gamma = 2^-15,
-                     # SV.cost = 2^-5,
-                     # SV.degree=2,
-                     # SV.kernel='radial'
-)
-                     
-predictions <- predict(object = hE, newdata=test, verbose=TRUE)
+# hE <- hybridEnsemble(x = train, y= ytrain, algorithms = c("LR", "RF", "AB"
+#                                                           #"SV")
+#                                                           ),
+#                      verbose = TRUE, filter=NULL,
+#                      # SV.gamma = 2^-15,
+#                      # SV.cost = 2^-5,
+#                      # SV.degree=2,
+#                      # SV.kernel='radial'
+# )
+#                      
+# predictions <- predict(object = hE, newdata=test, verbose=TRUE)
 
 # CVhE <- CVhybridEnsemble(x = train, y= ytrain, algorithms = c("LR", "RF"), verbose = TRUE, filter=NULL)
 #predictions <- predict(object = CVhE, newdata=test, verbose=TRUE)
@@ -242,41 +242,179 @@ predictions <- predict(object = hE, newdata=test, verbose=TRUE)
 #No optimalisation of parameters done yet
 #Slides mention that ideally 10 classifiers should be used in the ensemble
 #Perform the individual classifier predictions on a validation set, only the final predictions should be done with the test set!
-p_load(randomForest, xgboost, glmnet, AUC)
+p_load(randomForest, xgboost, glmnet, AUC, e1071, FNN, catboost, fastAdaboost, lightgbm, rotationForest)
+
+# models_function <- function(train, test, ytrain, ytest) {
+
+#Train all the models
 #LR
 # On sufficiently small lambda
 logreg <- cv.glmnet(x = data.matrix(train), y = ytrain, family = 'binomial',alpha = 0)
 
-predlr <- predict(logreg, newx = data.matrix(test),
-                       type = "response", s = 0.0003)
+# predlr <- predict(logreg, newx = data.matrix(test),
+#                        type = "response", s = 0.0003)
+# 
+# auc_lr <- AUC::auc(AUC::roc(predlr,ytest))
 
-auc_lr <- AUC::auc(AUC::roc(predlr,ytest))
+#NB
+NB <- naiveBayes(x= train, y= ytrain)
+
+# predNB <- predict(NB, test, type = "raw", threshold = 0.001)[,2]                                                       
+# auc_nb <- AUC::auc(roc(predNB, factor(ytest)))
+
+#KNN
+# scaling
+# stdev <- sapply(train, sd)
+# means <- sapply(train, mean)
+# trainKNN <- data.frame(t((t(train) - means)/stdev))
+# testKNN <- data.frame(t((t(test) - means)/stdev))
+# 
+# # retrieve the indicators of the k nearest neighbors of the
+# # query data
+# #STILL NEED TO OPTIMIZE k!
+# indicatorsKNN <- as.integer(knnx.index(data = trainKNN, query = testKNN,
+#                                        k = k))
+# # retrieve the actual y from the training set
+# predKNNoptimal <- as.integer(as.character(ytrain[indicatorsKNN]))
+# # if k > 1 then we take the proportion of 1s
+# predKNNoptimal <- rowMeans(data.frame(matrix(data = predKNNoptimal,
+#                                              ncol = k, nrow = nrow(testKNN))))
+# # Evaluate
+# AUC::auc(roc(predKNNoptimal, factor(ytest)))
+
 
 #RF
 rFmodel <- randomForest(x = train, y = ytrain,
                         ntree = 500, importance = TRUE)
-predrF <- predict(rFmodel, test, type = "prob")[, 2]
-auc_rf <- AUC::auc(AUC::roc(predrF, ytest))
+# predrF <- predict(rFmodel, test, type = "prob")[, 2]
+# auc_rf <- AUC::auc(AUC::roc(predrF, ytest))
+
+#CATBoost
+train_pool <- catboost.load_pool(data = data.matrix(train), 
+                                 label = as.numeric(as.character(ytrain)))
+# test_pool <- catboost.load_pool(data = data.matrix(test)) 
+#label = as.numeric(as.character(ytest)))
+#Default parameters
+params = list(loss_function = 'Logloss',
+              iterations = 100, 
+              depth = 6, 
+              learning_rate = 0.03,
+              l2_leaf_reg = 3, #L2 regularization term for the leaf nodes (also in xgboost)
+              metric_period=10)
+
+
+catboost_model <- catboost.train(train_pool,  NULL,
+                                       params = params)
+# 
+# predcatboost <- catboost.predict(catboost_model, test_pool, prediction_type = 'Probability')
+# auc_catboost <- AUC::auc(AUC::roc(predcatboost, ytest))
+
+#ADABoost
+#Put in formula notation
+train_ada <- train
+train_ada$y <- ytrain
+# test_ada <- test
+# test_ada$y <- test
+
+ABmodel <- adaboost(y ~ ., train_ada, nIter = 50) #Default iterations
+# predAB <- predict(ABmodel, test)$prob[, 2]
+# auc_ab <- AUC::auc(AUC::roc(predAB, ytest))
+
+#Light GBM
+#Randomly chosen parameters
+param_set <- list(num_leaves = 4,
+                        learning_rate = 0.05, objective = "binary",
+                        boosting = "gbdt", num_iterations = 20)
+
+lgbm_model <- lightgbm(data = as.matrix(train), params = param_set,
+                       label = as.numeric(as.character(ytrain)), verbose = -1)
+
+# predlgbm <- predict(lgbm_model, as.matrix(test))
+# auc_lgbm <- AUC::auc(AUC::roc(predlgbm, ytest))
+
+#Rotation Forest
+train_rof <- sapply(train, as.numeric)
+RoF <- rotationForest(x = train_rof, y = ytrain, L = 100)
+
+# predRoF <- predict(RoF, test)
+# auc_rof <- AUC::auc(AUC::roc(predRoF, ytest))
 
 #XGB
 #Right now with defaults, but xgboost will perform better if hyperparamters are tuned!
-train <- train %>%
+train_xgb <- train %>%
   mutate_if(is.factor, as.character) %>% mutate_if(is.character, as.numeric)
-test <- test %>%
-  mutate_if(is.factor, as.character) %>% mutate_if(is.character, as.numeric)
+# test_xgb <- test %>%
+#   mutate_if(is.factor, as.character) %>% mutate_if(is.character, as.numeric)
 # preparing matrices
-dtrain <- xgb.DMatrix(data = as.matrix(train), label = as.numeric(as.character(ytrain)))
-dtest <- xgb.DMatrix(data = as.matrix(test))
+dtrain <- xgb.DMatrix(data = as.matrix(train_xgb), label = as.numeric(as.character(ytrain)))
+#dtest <- xgb.DMatrix(data = as.matrix(test_xgb))
 xgb <- xgb.train(data = dtrain,
                  objective = "binary:logistic", verbose = 0, nrounds=500)
+# predxgb <- predict(xgb, dtest)
+# auc_xgb <- AUC::auc(AUC::roc(predxgb, ytest))
+
+
+# Weight according to performance
+# finalpredictions <- (auc_lr/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlr +
+#                     (auc_nb/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predNB +
+#                     (auc_rf/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predrF +
+#                     (auc_catboost/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predcatboost +
+#                     (auc_ab/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predAB +
+#                     (auc_lgbm/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlgbm +
+#                     (auc_rof/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predRoF +
+#                     (auc_xgb/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predxgb
+# final_AUC <- AUC::auc(AUC::roc(finalpredictions, ytest))
+
+
+#Make a function for all the predictions
+predict_function <- function(test, ytest) {
+predlr <- predict(logreg, newx = data.matrix(test),
+                  type = "response", s = 0.0003)
+auc_lr <- AUC::auc(AUC::roc(predlr,ytest))
+
+predNB <- predict(NB, test, type = "raw", threshold = 0.001)[,2]                                                       
+auc_nb <- AUC::auc(roc(predNB, factor(ytest)))
+
+predrF <- predict(rFmodel, test, type = "prob")[, 2]
+auc_rf <- AUC::auc(AUC::roc(predrF, ytest))
+
+test_pool <- catboost.load_pool(data = data.matrix(test)) 
+predcatboost <- catboost.predict(catboost_model, test_pool, prediction_type = 'Probability')
+auc_catboost <- AUC::auc(AUC::roc(predcatboost, ytest))
+
+test_ada <- test
+test_ada$y <- test
+predAB <- predict(ABmodel, test)$prob[, 2]
+auc_ab <- AUC::auc(AUC::roc(predAB, ytest))
+
+predlgbm <- predict(lgbm_model, as.matrix(test))
+auc_lgbm <- AUC::auc(AUC::roc(predlgbm, ytest))
+
+predRoF <- predict(RoF, test)
+auc_rof <- AUC::auc(AUC::roc(predRoF, ytest))
+
+test_xgb <- test %>%
+  mutate_if(is.factor, as.character) %>% mutate_if(is.character, as.numeric)
+dtest <- xgb.DMatrix(data = as.matrix(test_xgb))
 predxgb <- predict(xgb, dtest)
 auc_xgb <- AUC::auc(AUC::roc(predxgb, ytest))
 
-#NB
-
 # Weight according to performance
-finalpredictions <- (auc_lr/(auc_lr + auc_rf + auc_xgb)) * predlr +
-                    (auc_rf/(auc_lr + auc_rf + auc_xgb)) * predrF + 
-                    (auc_xgb/(auc_lr + auc_rf + auc_xgb)) * predxgb
-AUC::auc(AUC::roc(finalpredictions, ytest))
+finalpredictions <- (auc_lr/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlr +
+  (auc_nb/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predNB +
+  (auc_rf/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predrF +
+  (auc_catboost/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predcatboost +
+  (auc_ab/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predAB +
+  (auc_lgbm/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlgbm +
+  (auc_rof/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predRoF +
+  (auc_xgb/(auc_lr + auc_nb + auc_rf + auc_catboost + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predxgb
 
+final_AUC <- AUC::auc(AUC::roc(finalpredictions, ytest))
+
+.GlobalEnv$final_preds <- finalpredictions
+.GlobalEnv$final_AUC <- final_AUC
+}
+
+#Make the final predictions
+#resulting predicitions are in final_preds with a corresponding final_AUC
+predict_function(test, ytest)
