@@ -94,7 +94,7 @@ basetable <- basetable %>%
 #Aggregate everything so that one row equals one team per race
 #Variables inlcude team scores on different attributes, number of drivers with certain attributes
 #Team points in the race and amount of top_X finishes per race
-team_scores_per_race <-basetable %>%
+team_scores_per_race <- basetable %>%
   group_by(Year, Race_ID_Stage, Team.x) %>%
   summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
             team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
@@ -223,8 +223,11 @@ hE <- hybridEnsemble(x = train, y= ytrain, algorithms = c("LR", "RF", "AB"
                      # SV.degree=2,
                      # SV.kernel='radial'
 )
-                     
+
+
 predictions <- predict(object = hE, newdata=test, verbose=TRUE)
+predictions[1]
+
 
 # CVhE <- CVhybridEnsemble(x = train, y= ytrain, algorithms = c("LR", "RF"), verbose = TRUE, filter=NULL)
 # summary(CVhE, stat='median')
@@ -247,6 +250,7 @@ auc_lr <- AUC::auc(AUC::roc(predlr,ytest))
 rFmodel <- randomForest(x = train, y = ytrain,
                         ntree = 500, importance = TRUE)
 predrF <- predict(rFmodel, test, type = "prob")[, 2]
+
 auc_rf <- AUC::auc(AUC::roc(predrF, ytest))
 
 #XGB
