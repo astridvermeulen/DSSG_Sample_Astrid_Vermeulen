@@ -11,87 +11,92 @@ p_load(tidyverse, GA, Rcpp)
 ```
 
 ```{r}
-# Select team and year 
+# Select team, year and race type
 team = 'Etixx - Quick Step'
-year = 2016
+year = 2016 
+race_category = 'Flat'
 ```
 
 ```{r}
-# Get the whole available team
+# Get the whole available team in a given year
 team_all <- basetable %>% filter((Team.x == team) & (Year == year)) %>% distinct(Rider,.keep_all = T) %>%     select(Rider,Team.x) # Select the available team members of a given team in a given year
 
-# # test with team of 3 people
-# team_all <- team_all %>% head(3)
+# Team size is used later on in GA algorithm
+team_size_all <- nrow(team_all)
 
-team_size <- nrow(team_all) 
-```
-
-```{r}
-#make function to create team scores from rider selection
-summarize_function <- function(team_selection){
-  
-  team_selection_name <- team_all[team_selection == 1,'Rider']
-  
-  team_selection_base <- basetable %>% distinct(Rider ,.keep_all = T) %>% filter(Rider %in% team_selection_name)
-
-  team <- team_selection_base %>%
-    summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
-            team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
-            team_score_cobbles = sum(COBBLES), team_score_tt = sum(TT), team_score_prologue = sum(PROLOGUE),
-            team_score_sprint = sum(SPRINT), team_score_acceleration = sum(ACCELERATION), team_score_endurance = sum(ENDURANCE),
-            team_score_resistance = sum(RESISTANCE), team_score_recup = sum(RECUP), team_score_hill = sum(HILL),
-            team_score_attack = sum(ATTACK), 
-            avg_team_size = mean(Size), avg_team_weight = mean(Weight),
-            nr_drivers = n_distinct(Rider),
-            nr_flat_drivers = sum(flat_driver), nr_mountain_drivers = sum(mountain_driver), nr_downhill_drivers = sum(downhill_driver),
-            nr_cobbles_drivers = sum(cobbles_driver), nr_tt_drivers = sum(tt_driver), nr_prologue_drivers = sum(prologue_driver),
-            nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
-              sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
-            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age))
-  
-#drop columns that are not of any use
-drop <- c("team_points")
-team = team[,!(names(team) %in% drop)]
-
-return(team)
-}
 ```
 
 
 ```{r}
+# make summarize_function to create team scores from rider selection
+# summarize_function <- function(team_selection){
+#   
+#   team_selection_name <- team_all[team_selection == 1,'Rider']
+#   
+#   team_selection_base <- basetable %>% distinct(Rider ,.keep_all = T) %>% filter(Rider %in% team_selection_name)
+# 
+#   team <- team_selection_base %>%
+#     summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
+#             team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
+#             team_score_cobbles = sum(COBBLES), team_score_tt = sum(TT), team_score_prologue = sum(PROLOGUE),
+#             team_score_sprint = sum(SPRINT), team_score_acceleration = sum(ACCELERATION), team_score_endurance = sum(ENDURANCE),
+#             team_score_resistance = sum(RESISTANCE), team_score_recup = sum(RECUP), team_score_hill = sum(HILL),
+#             team_score_attack = sum(ATTACK), 
+#             avg_team_size = mean(Size), avg_team_weight = mean(Weight),
+#             nr_drivers = n_distinct(Rider),
+#             nr_flat_drivers = sum(flat_driver), nr_mountain_drivers = sum(mountain_driver), nr_downhill_drivers = sum(downhill_driver),
+#             nr_cobbles_drivers = sum(cobbles_driver), nr_tt_drivers = sum(tt_driver), nr_prologue_drivers = sum(prologue_driver),
+#             nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
+#               sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
+#             nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age))
+#   
+# #drop columns that are not of any use
+# drop <- c("team_points")
+# team = team[,!(names(team) %in% drop)]
+# 
+# return(team)
+# }
+```
+
+
+```{r}
+# GA using h2o to build ensemble
+# This does not work as I get time out error, probably because of the API in h2o
 # Make evaluate function
-evaluate <- function (x) {
-  
-  input <- get_team_scores(x) # from driver selection, create teamscores df
-  input <- as.h2o(input) # convert df to h2o object
-  
-  # predict
-  preds <- h2o.predict(ensemble, input) # predict prob of succes
-  preds <- as.data.frame(preds) 
-  preds <- unlist(preds[,3]) # third column = prob(1) = prob(success)
-  
-  obj <- preds
-  
-  available_positions = sum(x) # constraint on positions
-
-  
-  if(available_positions > 6) {
-    return(0) # If you violate the constraint = return a very low number
-  } else {
-    return (obj) # Maximization by default
-  }
-}
-
-#Model GA
-result <- ga(type = "binary",
-               fitness = evaluate, 
-               popSize = 150, 
-               maxiter = 100, 
-               pmutation = 0.01, 
-               monitor = FALSE,
-             nBits = 18) # size of available riders
-
-summary(result)
+# You have to initialize the h2o code first in Liesel's 'PredictiveModel.Rmd' file. 
+# evaluate <- function (x) {
+#   
+#   input <- get_team_scores(x) # from driver selection, create teamscores df
+#   input <- as.h2o(input) # convert df to h2o object
+#   
+#   # predict
+#   preds <- h2o.predict(ensemble, input) # predict prob of succes
+#   preds <- as.data.frame(preds) 
+#   preds <- unlist(preds[,3]) # third column = prob(1) = prob(success)
+#   
+#   obj <- preds
+#   
+#   available_positions = sum(x) # constraint on positions
+# 
+#   
+#   if(available_positions > 6) {
+#     return(0) # If you violate the constraint = return a very low number
+#   } else {
+#     return (obj) # Maximization by default
+#   }
+# }
+# 
+# #Model GA
+# # popsize and maxiter very low to avoid time out error
+# result <- ga(type = "binary",
+#                fitness = evaluate, 
+#                popSize = 4, 
+#                maxiter = 2, 
+#                pmutation = 0.01, 
+#                monitor = FALSE,
+#              nBits = 18) # size of available riders
+# 
+# summary(result)
 ```
 
 ```{r}
@@ -104,5 +109,118 @@ rider_selection <- summary(result)$solution %>% as.numeric()
 team_all[rider_selection ==1,]
 ```
 
+```{r}
+team_selection <- sample(c(0,1), replace=TRUE, size=nrow(team_all))
+team_selection
+```
 
 
+```{r}
+# Summarize function to make the same basetable the models were trained on 
+summarize_function <- function(team_selection, race_category){
+
+  team_selection_name <- team_all[team_selection == 1,'Rider'] # Get names of selected riders
+  
+  team_selection_base <- basetable %>% distinct(Rider ,.keep_all = T) %>% filter(Rider %in% team_selection_name) # Get information on the selected riders. The columns which we summarize in the next step are static. So it doesn't matter which race we get the riders information from. 
+  
+  # Calculate team scores
+  team <- team_selection_base %>%
+  summarise( team_popularity = sum(Popularity), team_potential = sum(Potential),
+            team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
+            team_score_cobbles = sum(COBBLES), team_score_tt = sum(TT), team_score_prologue = sum(PROLOGUE),
+            team_score_sprint = sum(SPRINT), team_score_acceleration = sum(ACCELERATION), team_score_endurance = sum(ENDURANCE),
+            team_score_resistance = sum(RESISTANCE), team_score_recup = sum(RECUP), team_score_hill = sum(HILL),
+            team_score_attack = sum(ATTACK), 
+            avg_team_size = mean(Size), avg_team_weight = mean(Weight),
+            nr_drivers = n_distinct(Rider),
+            nr_flat_drivers = sum(flat_driver), nr_mountain_drivers = sum(mountain_driver), nr_downhill_drivers = sum(downhill_driver),
+            nr_cobbles_drivers = sum(cobbles_driver), nr_tt_drivers = sum(tt_driver), nr_prologue_drivers = sum(prologue_driver),
+            nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
+              sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
+            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age),
+            top20_finishes = sum(Pos <= 20), top10_finishes = sum(Pos <= 10), top5_finishes = sum(Pos <= 5), top3_finishes = sum(Pos <= 3)
+            )
+  
+  #drop team points
+  # drop <- c("team_points")
+  # team = team[,!(names(team) %in% drop)]
+
+  
+  # add race category as factor to team
+  # lelijke code, maar R deed moeilijk
+  # team[colnames(dummies)] <- as.character(0)
+  # category <- race_category
+  # category <- paste('Race_Category_' ,category, sep="")
+  # team[category] <- as.character(1)
+  # team[2,] <- 1
+  # team[3,] <- 0
+  # team <- team %>% mutate_if(is.character, as.factor)
+  # team <- team[-(2:3),] 
+  
+  # add race category as numeric to team
+  team[colnames(dummies)] <- as.numeric(0)
+  category <- race_category
+  category <- paste('Race_Category_' ,category, sep="")
+  team[category] <- as.character(1)
+ 
+  
+return(team)
+  
+}
+```
+
+
+```{r}
+summarize_function(team_selection,race_category)
+```
+
+
+```{r}
+# GA using RF to build ensemble 
+# Make evaluate function
+evaluate <- function (x) {
+  
+  team <- summarize_function(x,race_category) # from driver selection, create team scores
+  
+  if(!any(is.na(team))){ # When input is all zero (no riders) immediately return low number, otherwise RF will throw error as the summarize_function will return an Na's which RF cannot handle
+  
+    # predict
+  obj <- predict(rFmodel,team, type = "prob")[,2] # predict prob of success = objective function
+  
+  team_size = sum(x) 
+
+  
+  if(team_size != 6) {
+    return(0) # If you violate the constraint = return a very low number
+  } else {
+    return (obj) # Maximization by default
+  }
+  } else{
+    return(0)
+  }
+}
+
+#Model GA
+# popsize and maxiter very low to avoid time out error
+result <- ga(type = "binary",
+               fitness = evaluate, 
+               popSize = 200, 
+               maxiter = 150, 
+               pmutation = 0.01, 
+               monitor = FALSE,
+             nBits = team_size_all) # team size of whole available team
+
+summary(result)
+```
+
+
+```{r}
+# Get selected drivers 
+rider_selection <- summary(result)$solution[1,] %>% as.numeric()
+rider_selection
+```
+
+```{r}
+# Show solution
+team_all[rider_selection == 1,]
+```
