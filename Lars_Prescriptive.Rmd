@@ -19,7 +19,7 @@ race_category = 'Flat'
 
 ```{r}
 # Get the whole available team in a given year
-team_all <- basetable %>% filter((Team.x == team) & (Year == year)) %>% distinct(Rider,.keep_all = T) %>%     select(Rider,Team.x) # Select the available team members of a given team in a given year
+team_all <- basetable %>% filter((Team.x == team) & (Year == year)) %>% distinct(Rider,.keep_all = T) %>% select(Rider,Team.x) # Select the available team members of a given team in a given year
 
 # Team size is used later on in GA algorithm
 team_size_all <- nrow(team_all)
