@@ -6,6 +6,9 @@ output: html_document
 ---
 
 ```{r}
+#install packages
+if (!require("pacman")) install.packages("pacman")
+require("pacman", character.only = TRUE, quietly = TRUE)
 p_load(tidyverse, GA, Rcpp)
 
 ```
@@ -172,6 +175,13 @@ return(team)
 
 ```{r}
 summarize_function(team_selection,race_category)
+```
+
+```{r}
+#write here the model ensemble
+#model <- XXX
+
+#in obj function you can then use this model
 ```
 
 
