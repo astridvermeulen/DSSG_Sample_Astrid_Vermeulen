@@ -244,8 +244,6 @@ test <- test[,names(test) != 'success']
 #Perform the individual classifier predictions on a validation set, only the final predictions should be done with the test set!
 p_load(randomForest, xgboost, glmnet, AUC, e1071, FNN, catboost, fastAdaboost, lightgbm, rotationForest)
 
-# models_function <- function(train, test, ytrain, ytest) {
-
 #Train all the models
 #LR
 # On sufficiently small lambda
@@ -418,3 +416,37 @@ final_AUC <- AUC::auc(AUC::roc(finalpredictions, ytest))
 #Make the final predictions
 #resulting predicitions are in final_preds with a corresponding final_AUC
 predict_function(test, ytest)
+
+
+
+# Lars: make prediction function for unseend data
+predlr <- predict(logreg, newx = data.matrix(test),
+                  type = "response", s = 0.0003)
+auc_lr <- AUC::auc(AUC::roc(predlr,ytest))
+
+predNB <- predict(NB, test, type = "raw", threshold = 0.001)[,2]                                                       
+auc_nb <- AUC::auc(roc(predNB, factor(ytest)))
+
+predrF <- predict(rFmodel, test, type = "prob")[, 2]
+auc_rf <- AUC::auc(AUC::roc(predrF, ytest))
+
+test_pool <- catboost.load_pool(data = data.matrix(test)) 
+predcatboost <- catboost.predict(catboost_model, test_pool, prediction_type = 'Probability')
+auc_catboost <- AUC::auc(AUC::roc(predcatboost, ytest))
+
+test_ada <- test
+test_ada$y <- test
+predAB <- predict(ABmodel, test)$prob[, 2]
+auc_ab <- AUC::auc(AUC::roc(predAB, ytest))
+
+predlgbm <- predict(lgbm_model, as.matrix(test))
+auc_lgbm <- AUC::auc(AUC::roc(predlgbm, ytest))
+
+predRoF <- predict(RoF, test)
+auc_rof <- AUC::auc(AUC::roc(predRoF, ytest))
+
+test_xgb <- test %>%
+  mutate_if(is.factor, as.character) %>% mutate_if(is.character, as.numeric)
+dtest <- xgb.DMatrix(data = as.matrix(test_xgb))
+predxgb <- predict(xgb, dtest)
+auc_xgb <- AUC::auc(AUC::roc(predxgb, ytest))
