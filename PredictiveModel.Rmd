@@ -36,7 +36,7 @@ first_cycling_data$UCI[is.na(first_cycling_data$UCI)] <- 0
 pro_cycling_data$Rider <- str_c(pro_cycling_data$`Family Name`, ' ', pro_cycling_data$`Given Name`)
 
 # merge two data frames by ID
-basetable <- merge(first_cycling_data, pro_cycling_data,by="Rider")
+basetable <- merge(first_cycling_data, pro_cycling_data, by="Rider")
 
 ```
 
@@ -185,7 +185,7 @@ table(train$success)
 ```
 
 
-```{r}
+```{r include=FALSE}
 ##OVERSAMPLING##
 
 # Get indices of each group
@@ -215,9 +215,9 @@ p_load(h2o)
 ```
 
 ```{r}
-#h2o.ls()
-#h2o.removeAll()
-#h2o.ls()
+# h2o.ls()
+# h2o.removeAll()
+# h2o.ls()
 ```
 
 ```{r}
@@ -236,16 +236,16 @@ x <- setdiff(names(train_h2o), y)
 
 ```{r}
 #xgboost
-my_xgb <- h2o.xgboost(x = x,
-                           y = y,
-                           training_frame = train_h2o,
-                           validation_frame = test_h2o,
-                           booster = "dart",
-                           normalize_type = "tree",
-                           nfolds = 5,
-                           #fold_column = "group",
-                           keep_cross_validation_predictions = TRUE,
-                           seed = 5)
+# my_xgb <- h2o.xgboost(x = x,
+#                            y = y,
+#                            training_frame = train_h2o,
+#                            validation_frame = test_h2o,
+#                            booster = "dart",
+#                            normalize_type = "tree",
+#                            nfolds = 5,
+#                            #fold_column = "group",
+#                            keep_cross_validation_predictions = TRUE,
+#                            seed = 5)
  
 #naive bayes
 my_nb <- h2o.naiveBayes(x = x,
@@ -281,9 +281,10 @@ my_lr <- h2o.glm(x = x,
 # Train a stacked ensemble using the models above
 ensemble <- h2o.stackedEnsemble(x = x,
                                 y = y,
-                                metalearner_algorithm="xgboost",
+                                metalearner_algorithm="AUTO",
                                 training_frame = train_h2o,
-                                base_models = list(my_xgb, my_nb, my_rf, my_lr))
+                                base_models = list(#my_xgb, 
+                                                    my_nb, my_rf, my_lr))
 ```
 
 ```{r}
@@ -293,11 +294,12 @@ perf <- h2o.performance(ensemble, newdata = test_h2o)
 
 ```{r}
 # Compare to base learner performance on the test set
-perf_gbm_test <- h2o.performance(my_xgb, newdata = test_h2o)
+#perf_gbm_test <- h2o.performance(my_xgb, newdata = test_h2o)
 perf_nb_test <- h2o.performance(my_nb, newdata = test_h2o)
 perf_lr_test <- h2o.performance(my_lr, newdata = test_h2o)
 perf_rf_test <- h2o.performance(my_rf, newdata = test_h2o)
-baselearner_best_auc_test <- max(h2o.auc(perf_gbm_test), h2o.auc(perf_nb_test), h2o.auc(perf_lr_test), h2o.auc(perf_rf_test))
+baselearner_best_auc_test <- max(#h2o.auc(perf_gbm_test), 
+  h2o.auc(perf_nb_test), h2o.auc(perf_lr_test), h2o.auc(perf_rf_test))
 ensemble_auc_test <- h2o.auc(perf)
 print(sprintf("Best Base-learner Test AUC:  %s", baselearner_best_auc_test))
 print(sprintf("Ensemble Test AUC:  %s", ensemble_auc_test))
@@ -315,7 +317,4 @@ preds <- cbind(preds)
 preds[,1]
 ```
 
-```{r}
-
-```
 
