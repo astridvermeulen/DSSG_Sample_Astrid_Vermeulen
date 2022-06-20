@@ -36,7 +36,7 @@ first_cycling_data$UCI[is.na(first_cycling_data$UCI)] <- 0
 pro_cycling_data$Rider <- str_c(pro_cycling_data$`Family Name`, ' ', pro_cycling_data$`Given Name`)
 
 # merge two data frames by ID
-basetable <- merge(first_cycling_data, pro_cycling_data,by="Rider")
+basetable <- merge(first_cycling_data, pro_cycling_data, by="Rider")
 
 ```
 
@@ -185,7 +185,7 @@ table(train$success)
 ```
 
 
-```{r}
+```{r include=FALSE}
 ##OVERSAMPLING##
 
 # Get indices of each group
@@ -281,7 +281,7 @@ my_lr <- h2o.glm(x = x,
 # Train a stacked ensemble using the models above
 ensemble <- h2o.stackedEnsemble(x = x,
                                 y = y,
-                                metalearner_algorithm="randomforest",
+                                metalearner_algorithm="AUTO",
                                 training_frame = train_h2o,
                                 base_models = list(#my_xgb, 
                                                     my_nb, my_rf, my_lr))
@@ -317,7 +317,4 @@ preds <- cbind(preds)
 preds[,1]
 ```
 
-```{r}
-
-```
 
