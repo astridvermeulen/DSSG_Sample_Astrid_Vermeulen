@@ -13,8 +13,15 @@ library(ggplot2)
 first_cycling_data <- read.csv("Races_WITHindex.csv", header = TRUE)
 pro_cycling_data <- read_excel("RiderData.xlsx")
 
+#check for missing values
+colSums(is.na(first_cycling_data))
+colSums(is.na(pro_cycling_data))
+
 #impute missing UCIs with 0 as missing values means that the driver finished outside of the points and thus did not earn any
 first_cycling_data$UCI[is.na(first_cycling_data$UCI)] <- 0
+
+#drop races with missing values for Team_ID and/or Rider_ID (signify different racing formats) 
+first_cycling_data <- first_cycling_data %>% drop_na(Team_ID, Rider_ID)
 
 #merge on name and team (because what if a rider switches teams?)
 #merge Given Name and Family name to one column: Rider (necessary for merge)
