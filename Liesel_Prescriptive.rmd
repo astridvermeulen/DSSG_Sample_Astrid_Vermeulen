@@ -1,0 +1,517 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+#install packages
+if (!require("pacman")) install.packages("pacman")
+require("pacman", character.only = TRUE, quietly = TRUE)
+p_load(tidyverse, GA, pso,Rcpp, BPSO, tabuSearch)
+p_load(randomForest, xgboost, glmnet, AUC, e1071, FNN, fastAdaboost, lightgbm, rotationForest)
+# install.packages("remotes")
+# remotes::install_github("DominikMueller64/BPSO")
+```
+
+```{r}
+# Select team, year and race type
+# Our case is about optimal team selection of Jumbo-Visma in 2021 in flat races.
+team = 'Jumbo-Visma'
+year = 2021
+race_category = 'Flat' 
+```
+
+```{r}
+# Get the whole available team in a given year
+team_all <- basetable %>% filter((Team.x == team) & (Year == year)) %>% distinct(Rider,.keep_all = T) %>% select(Rider,Team.x) # Select the available team members of a given team in a given year
+
+# Team size is used later on in GA algorithm
+team_size_all <- nrow(team_all)
+```
+
+```{r}
+team_all
+```
+```{r}
+#Possibly good solution: 
+good_initial <- c(0,0,0,0,1,0,0,1,1,0,0,0,0,0,0,0,1,0,1,0,1,0,0,1)
+good_initial <- t(as.matrix(good_initial))
+```
+
+```{r}
+team_selection <- c(0,0,0,0,1,0,0,1,1,0,0,0,0,0,0,0,1,0,1,0,1,0,0,1)
+team_selection
+```
+
+```{r}
+team_selection_name <- team_all[team_selection == 1,'Rider'] # Get names of selected riders
+team_selection_base <- basetable %>% distinct(Rider,.keep_all = T) %>% filter(Rider %in% team_selection_name)
+team_selection_name
+```
+
+```{r}
+# Summarize function to make the same basetable the models were trained on 
+summarize_function <- function(team_selection, race_category){
+  team_selection_name <- team_all[team_selection == 1,'Rider'] # Get names of selected riders
+  
+  team_selection_base <- basetable %>% distinct(Rider ,.keep_all = T) %>% filter(Rider %in% team_selection_name$Rider) %>% ungroup() # Get information on the selected riders. The columns which we summarize in the next step are static. So it doesn't matter which race we get the riders information from. 
+
+  # Calculate team scores
+  team <- team_selection_base %>%
+    summarise( team_popularity = sum(Popularity), team_potential = sum(Potential),
+            team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
+            team_score_cobbles = sum(COBBLES), team_score_tt = sum(TT), team_score_prologue = sum(PROLOGUE),
+            team_score_sprint = sum(SPRINT), team_score_acceleration = sum(ACCELERATION), team_score_endurance = sum(ENDURANCE),
+            team_score_resistance = sum(RESISTANCE), team_score_recup = sum(RECUP), team_score_hill = sum(HILL),
+            team_score_attack = sum(ATTACK), 
+            avg_team_size = mean(Size), avg_team_weight = mean(Weight),
+            nr_drivers = n_distinct(Rider),
+            nr_flat_drivers = sum(flat_driver), nr_mountain_drivers = sum(mountain_driver), nr_downhill_drivers = sum(downhill_driver),
+            nr_cobbles_drivers = sum(cobbles_driver), nr_tt_drivers = sum(tt_driver), nr_prologue_drivers = sum(prologue_driver),
+            nr_sprint_drivers = sum(sprint_driver), nr_acceleration_drivers = sum(acceleration_driver), nr_resistance_drivers =
+              sum(resistance_driver), nr_endurance_drivers = sum(endurance_driver), nr_recup_drivers = sum(recup_driver), 
+            nr_hill_drivers = sum(hill_driver), nr_attack_drivers = sum(attack_driver), avg_age_drivers = mean(age))
+
+  
+  # add race category as numeric to team
+  team[colnames(dummies)] <- as.numeric(1)
+  category <- race_category
+  category <- paste('Race_Category_' ,category, sep="")
+  team[category] <- as.numeric(2)
+  
+return(team)
+  
+}
+```
+
+
+```{r}
+summarize_function(team_selection, race_category)
+```
+
+GENETIC ALGORITHM
+```{r}
+# GA using ensemble to build ensemble 
+# Make evaluate function
+evaluate <- function (x) {
+  
+  team <- summarize_function(x,race_category) # from driver selection, create team scores
+  
+  if(!any(is.na(team))){ # When input is all zero (no riders) immediately return low number, otherwise RF will throw error as the summarize_function will return an Na's which RF cannot handle
+  
+  # predict
+  predlr <- predict(logreg, newx = data.matrix(team),
+                  type = "response", s = 0.0003)
+  predNB <- predict(NB, team, type = "raw", threshold = 0.001)[,2]
+  predrF <- predict(rFmodel, team, type = "prob")[, 2]
+  predAB <- predict(ABmodel, team)$prob[, 2]
+  predlgbm <- predict(lgbm_model, as.matrix(team))
+  predRoF <- predict(RoF, team)
+  predxgb <- predict(xgb, xgb.DMatrix(as.matrix(team)))
+
+  # combine predictions using AUC
+  obj <- (auc_lr/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlr +
+  (auc_nb/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predNB +
+  (auc_rf/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predrF +
+  (auc_ab/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predAB +
+  (auc_lgbm/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlgbm +
+  (auc_rof/(auc_lr + auc_nb + auc_rf  + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predRoF +
+  (auc_xgb/(auc_lr + auc_nb + auc_rf  + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predxgb
+
+  team_size = sum(x) 
+
+  
+  if((team_size > 7) || (obj<0) || (obj>1)) {
+    return(0) # If you violate the constraint = return a very low number
+  } else {
+    return (obj) # Maximization by default
+  }
+  } else{
+    return(0)
+  }
+}
+
+#Model GA
+# popsize and maxiter very low to avoid time out error
+result <- ga(type = "binary",
+               fitness = evaluate, 
+               popSize = 150, 
+               maxiter = 100, 
+               pmutation = 0.01, 
+               monitor = FALSE,
+             nBits = team_size_all,# team size of whole available team
+             selection = gabin_rwSelection, 
+             suggestions = good_initial) 
+
+summary(result)
+```
+
+```{r}
+# Get selected drivers 
+rider_selection <- summary(result)$solution[1,] %>% as.numeric()
+rider_selection
+```
+
+```{r}
+# Show solution
+team_all[rider_selection == 1,]
+```
+
+
+PSO: population based, but should be faster (simple vector sum) than GA + higher level of randomization due to inertia 
+Unfortunately, we can't make it work for binary DV...
+```{r}
+# evaluate_pso <- function (x) {
+#   
+#   team <- summarize_function(x,race_category) # from driver selection, create team scores
+#   
+#   if(!any(is.na(team))){ # When input is all zero (no riders) immediately return low number, otherwise RF will throw error as the summarize_function will return an Na's which RF cannot handle
+#   
+#    # predict
+#   predlr <- predict(logreg, newx = data.matrix(team),
+#                   type = "response", s = 0.0003)
+#   predNB <- predict(NB, team, type = "raw", threshold = 0.001)[,2]
+#   predrF <- predict(rFmodel, team, type = "prob")[, 2]
+#   predAB <- predict(ABmodel, team)$prob[, 2]
+#   predlgbm <- predict(lgbm_model, as.matrix(team))
+#   predRoF <- predict(RoF, team)
+#   predxgb <- predict(xgb, xgb.DMatrix(as.matrix(team)))
+# 
+#   # combine predictions using AUC
+#   obj <- (auc_lr/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlr +
+#   (auc_nb/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predNB +
+#   (auc_rf/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predrF +
+#   (auc_ab/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predAB +
+#   (auc_lgbm/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlgbm +
+#   (auc_rof/(auc_lr + auc_nb + auc_rf  + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predRoF +
+#   (auc_xgb/(auc_lr + auc_nb + auc_rf  + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predxgb
+#   
+#   #constraints
+#   team_size = sum(x) 
+#   
+#   
+# 
+#   
+#   if((team_size > 7) || (!all(team %in% c(0,1))) ) {
+#     return(1000000000000) # If you violate the constraint = return a very large number
+#   } else {
+#     return (-obj) # minimization by default
+#   }
+#   } else{
+#     return(100000000000)
+#   }
+# }
+# 
+# #Model PSO
+# # Parameters
+# # maxit: the maximum number of iterations
+# # maxf: the maximum number of function evaluations
+# # abstol: the method converges once the best fitness obtained is less than or equal to abstol
+# # reltol: the tolerance for restarting. Defaults to 0 which disables the check for restarting
+# # s: the swarm size
+# # k: The exponent for calculating number of informants. Defaults to 3 (nearest neighbors)
+# # p: the average percentage of informants for each particle. Defaults to 1-(1-1/s)^k
+# # w: the exploitation constant.  Defaults to 1/(2*log(2))
+# 
+# grid <- list(maxit = 20, maxf = Inf, 
+#                  abstol = -Inf, reltol = 0, 
+#                  s = 10, k = 3, p = 1 - (1 - 1/40)^3, 
+#              w = 1/(2 * log(2)))
+# 
+# # PSO
+# psoptim.results <- psoptim(par = team_selection,
+#                            fn = evaluate_pso,
+#                            lower = rep(0, team_size_all), 
+#                            upper = rep(1, team_size_all), 
+#                            control = list(maxit = grid$maxit, 
+#                                           maxf = grid$maxf, 
+#                                           abstol = grid$abstol, 
+#                                           reltol = grid$reltol,
+#                                           s = grid$s, 
+#                                           k = grid$k, 
+#                                           p = grid$p, 
+#                                           w = grid$w))
+# 
+# psoptim.results$par
+
+```
+Binary pso function found online
+Unfortunately it doesn't take into account the constraint...
+```{r}
+# # Binary pso function found on internet
+# evaluate_Bpso <- function (x) {
+#   
+#   team <- summarize_function(x,race_category) # from driver selection, create team scores
+#   
+#   if(!any(is.na(team))){ # When input is all zero (no riders) immediately return low number, otherwise RF will throw error as the summarize_function will return an Na's which RF cannot handle
+#   
+#    # predict
+#   # predlr <- predict(logreg, newx = data.matrix(team),
+#   #                 type = "response", s = 0.0003)
+#   # predNB <- predict(NB, team, type = "raw", threshold = 0.001)[,2]
+#   # predrF <- predict(rFmodel, team, type = "prob")[, 2]
+#   # predAB <- predict(ABmodel, team)$prob[, 2]
+#   # predlgbm <- predict(lgbm_model, as.matrix(team))
+#   # predRoF <- predict(RoF, team)
+#   # predxgb <- predict(xgb, xgb.DMatrix(as.matrix(team)))
+#   # 
+#   # # combine predictions using AUC
+#   # obj <- (auc_lr/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlr +
+#   # (auc_nb/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predNB +
+#   # (auc_rf/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predrF +
+#   # (auc_ab/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predAB +
+#   # (auc_lgbm/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlgbm +
+#   # (auc_rof/(auc_lr + auc_nb + auc_rf  + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predRoF +
+#   # (auc_xgb/(auc_lr + auc_nb + auc_rf  + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predxgb
+#   
+#   obj <- predict(rFmodel, team, type = "prob")[, 2]
+#   
+#   
+#   #constraints
+#   team_size = sum(x) 
+#   
+#   
+# 
+#   
+#   if((team_size > 7) ) {
+#     return(1000000000000) # If you violate the constraint = return a very large number
+#   } else {
+#     return (-obj) # minimization by default
+#   }
+#   } else{
+#     return(100000000000)
+#   }
+# }
+# #Model PSO
+# results <- bpsoptim(par =team_selection, fn = evaluate_Bpso,
+#                control = list(maxit = 100, s =40),
+#                debug = TRUE)
+# 
+# 
+# rider_selection <- results$par
+# rider_selection
+```
+
+```{r}
+# Get selected drivers 
+# rider_selection <- summary(result)$solution[1,] %>% as.numeric()
+# rider_selection
+```
+
+```{r}
+# Show solution
+# team_all[rider_selection == 1,]
+```
+
+
+
+
+Tabu Search
+Unfortunalty we can't make it work for binary DV... 
+```{r}
+# BinaryVectorToReal <- function(y) {
+#   .binary <- function(x,mb=max(.maxBit(x,g)),g=2) {
+#     if( is.character(x) ) x<- .unbinary(x)
+#     if( g==2 )
+#       do.call(paste,c(sep="",lapply(mb:0,function(i) ifelse(.bit(x,i,g=2),"1","0"))))
+#     else{
+#       .toDigit <- function(x) c(0:9,LETTERS)[x+1]
+#       do.call(paste,c(sep="",lapply(mb:0,function(i) .toDigit(.bit(x,i,g=g)))))
+#     }
+#   }
+#   .unbinary <- function(x,g=2) {
+#     if( is.numeric(x) )
+#       return(x)
+#     nc =nchar(x)
+#     D = max(max(nchar(x)),2)
+#     .asDigit <- (if(g==2) function(x) as.logical((match(x,c("0","1","F","T"))-1)%%2) else function(x) as.integer((match(x,as.character(c(0:9,LETTERS,10:19,letters)[c(1:g,37:(36+g))]))-1)%%g))
+#     c(sapply(1:D,function(i) ifelse(i<=nc,.asDigit(substring(x,i,i))*g^(nc-i),rep(0,length(x))))%*%rep(1,D)) 
+#   }
+#   
+#   .bit <- function(x,b,g=2) UseMethod(".bit")                       
+#   .bit.numeric   <- function(x,b=0:.maxBit(x,g),g=2)  {
+#     erg <- sapply(b,function(b) (x%/% (g^b) %% g ))
+#     structure((if(g==2) as.logical else as.integer)(erg),dim=dim(erg))
+#   }
+#   .bit.character <- function(x,b=0:.maxBit(x,g),g=2)  {
+#     nc = nchar(x)
+#     .asDigit <- (if(g==2) function(x) as.logical((match(x,c("0","1","F","T"))-1)%%2) else function(x) as.integer((match(x,as.character(c(0:9,LETTERS,10:19,letters)[c(1:g,37:(36+g))]))-1)%%g))
+#     erg <- sapply(b,function(b) ifelse(b<nc,substring(x,nc-b,nc-b),"0"))
+#     structure(.asDigit(erg),dim=dim(erg))
+#   }
+#   
+#   
+#   .maxBit <- function(x,g=2) UseMethod(".maxBit")
+#   .maxBit.numeric <- function(x,g=2) ceiling(log(x+1,g))-1
+#   .maxBit.character <- function(x,g=2) max(nchar(x))-1
+#   
+#   ii = 0
+#   y.paste <- as.character()
+#   for (i in seq(0, (length(y) - 11), by = 11)) {
+#     ii <- ii + 1
+#     y.paste[ii] <- paste(y[(i + 1):(i + 11)], collapse = "")
+#   }
+#   real <- .unbinary(y.paste)
+#   res <- real/sum(real)
+#   res
+# }
+# 
+# RealVectorToBinary <- function(x) {
+#   .binary <- function(x,mb=max(.maxBit(x,g)),g=2) {
+#     if( is.character(x) ) x<- .unbinary(x)
+#     if( g==2 )
+#       do.call(paste,c(sep="",lapply(mb:0,function(i) ifelse(.bit(x,i,g=2),"1","0"))))
+#     else{
+#       .toDigit <- function(x) c(0:9,LETTERS)[x+1]
+#       do.call(paste,c(sep="",lapply(mb:0,function(i) .toDigit(.bit(x,i,g=g)))))
+#     }
+#   }
+#   .unbinary <- function(x,g=2) {
+#     if( is.numeric(x) )
+#       return(x)
+#     nc =nchar(x)
+#     D = max(max(nchar(x)),2)
+#     .asDigit <- (if(g==2) function(x) as.logical((match(x,c("0","1","F","T"))-1)%%2) else function(x) as.integer((match(x,as.character(c(0:9,LETTERS,10:19,letters)[c(1:g,37:(36+g))]))-1)%%g))
+#     c(sapply(1:D,function(i) ifelse(i<=nc,.asDigit(substring(x,i,i))*g^(nc-i),rep(0,length(x))))%*%rep(1,D)) 
+#   }
+#   
+#   .bit <- function(x,b,g=2) UseMethod(".bit")                       
+#   .bit.numeric   <- function(x,b=0:.maxBit(x,g),g=2)  {
+#     erg <- sapply(b,function(b) (x%/% (g^b) %% g ))
+#     structure((if(g==2) as.logical else as.integer)(erg),dim=dim(erg))
+#   }
+#   .bit.character <- function(x,b=0:.maxBit(x,g),g=2)  {
+#     nc = nchar(x)
+#     .asDigit <- (if(g==2) function(x) as.logical((match(x,c("0","1","F","T"))-1)%%2) else function(x) as.integer((match(x,as.character(c(0:9,LETTERS,10:19,letters)[c(1:g,37:(36+g))]))-1)%%g))
+#     erg <- sapply(b,function(b) ifelse(b<nc,substring(x,nc-b,nc-b),"0"))
+#     structure(.asDigit(erg),dim=dim(erg))
+#   }
+#   
+#   
+#   .maxBit <- function(x,g=2) UseMethod(".maxBit")
+#   .maxBit.numeric <- function(x,g=2) ceiling(log(x+1,g))-1
+#   .maxBit.character <- function(x,g=2) max(nchar(x))-1
+#   
+#   x <- x * 100
+#   y <- .binary(x, mb = 10)
+#   y <- as.integer(unlist(strsplit(as.character(y), 
+#                                     "")))
+#   y
+# }
+```
+
+```{r}
+# # Function to evaluate (default is maximization)
+# evaluateTabu <- function (x) {
+#   x<-c(t(x))
+#   team <- summarize_function(x,race_category) # from driver selection, create team scores
+#   
+#   if(!any(is.na(team))){ # When input is all zero (no riders) immediately return low number, otherwise RF will throw error as the summarize_function will return an Na's which RF cannot handle
+#   
+#   # predict
+#   # predlr <- predict(logreg, newx = data.matrix(team),
+#   #                 type = "response", s = 0.0003)
+#   # predNB <- predict(NB, team, type = "raw", threshold = 0.001)[,2]
+#   # predrF <- predict(rFmodel, team, type = "prob")[, 2]
+#   # predAB <- predict(ABmodel, team)$prob[, 2]
+#   # predlgbm <- predict(lgbm_model, as.matrix(team))
+#   # predRoF <- predict(RoF, team)
+#   # predxgb <- predict(xgb, xgb.DMatrix(as.matrix(team)))
+#   # 
+#   # # combine predictions using AUC
+#   # obj <- (auc_lr/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlr +
+#   # (auc_nb/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predNB +
+#   # (auc_rf/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predrF +
+#   # (auc_ab/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predAB +
+#   # (auc_lgbm/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlgbm +
+#   # (auc_rof/(auc_lr + auc_nb + auc_rf  + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predRoF +
+#   # (auc_xgb/(auc_lr + auc_nb + auc_rf  + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predxgb
+#   # 
+#   obj <- predict(RoF, team)
+#     
+#   #constraints
+#   team_size = sum(x) 
+#   
+#   
+# 
+#   
+#   if((team_size > 7) ) {
+#     return(0) # If you violate the constraint = return a very small number
+#   } else {
+#     return (obj) # max by default
+#   }
+#   } else{
+#     return(0)
+#   }
+# }
+# 
+# # Function to evaluate (default is maximization)
+# evaluateTabu2 <- function (x) {
+#   
+#   x <- as.integer(unlist(strsplit(as.character(x), "")))
+#   x <- BinaryVectorToReal(y = x)
+#     
+#   team <- summarize_function(x,race_category) # from driver selection, create team scores
+#   
+#   if(!any(is.na(team))){ # When input is all zero (no riders) immediately return low number, otherwise RF will throw error as the summarize_function will return an Na's which RF cannot handle
+#   
+#   # predict
+#   # predlr <- predict(logreg, newx = data.matrix(team),
+#   #                 type = "response", s = 0.0003)
+#   # predNB <- predict(NB, team, type = "raw", threshold = 0.001)[,2]
+#   # predrF <- predict(rFmodel, team, type = "prob")[, 2]
+#   # predAB <- predict(ABmodel, team)$prob[, 2]
+#   # predlgbm <- predict(lgbm_model, as.matrix(team))
+#   # predRoF <- predict(RoF, team)
+#   # predxgb <- predict(xgb, xgb.DMatrix(as.matrix(team)))
+#   # 
+#   # # combine predictions using AUC
+#   # obj <- (auc_lr/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlr +
+#   # (auc_nb/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predNB +
+#   # (auc_rf/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predrF +
+#   # (auc_ab/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predAB +
+#   # (auc_lgbm/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predlgbm +
+#   # (auc_rof/(auc_lr + auc_nb + auc_rf  + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predRoF +
+#   # (auc_xgb/(auc_lr + auc_nb + auc_rf  + auc_ab + auc_lgbm + auc_rof + auc_xgb)) * predxgb
+#   # 
+#   obj <- predict(RoF, team)
+#     
+#   #constraints
+#   team_size = sum(x) 
+#   
+#   
+# 
+#   
+#   if((team_size > 7) ) {
+#     return(0) # If you violate the constraint = return a very small number
+#   } else {
+#     return (obj) # max by default
+#   }
+#   } else{
+#     return(0)
+#   }
+# }
+# # Starting configuration
+# performance <- rep(1/team_size_all, team_size_all)
+# team_selection2 <- RealVectorToBinary(performance)
+# BinaryVectorToReal(team_selection2)
+# 
+# # Parameters
+# # iters : number of iterations
+# # listSize: tabu list size
+# grid <- list(iters = 2, listSize = c(5:12))
+# 
+# # tabuSearch
+# tabu.results <- tabuSearch(size = length(team_selection2), 
+#                            iters = grid$iters, 
+#                            objFunc = evaluateTabu2,
+#                            config = team_selection2)
+# 
+# rider_selection <- tabu.results$configKeep[which.max(tabu.results$eUtilityKeep), ]
+# (rider_selection <- BinaryVectorToReal(y = rider_selection))
+```
+
+
+
+
+

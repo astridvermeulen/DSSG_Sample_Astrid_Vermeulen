@@ -113,7 +113,7 @@ basetable <- basetable %>%
 #Aggregate everything so that one row equals one team per race
 #Variables inlcude team scores on different attributes, number of drivers with certain attributes
 #Team points in the race and amount of top_X finishes per race
-team_scores_per_race <-basetable_indep %>%
+team_scores_per_race <-basetable %>%  ## CHANGES MADE
   group_by(Year, Race_ID_Stage, Team.x) %>%
   summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
             team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
@@ -333,7 +333,9 @@ rf_vsrf <- varSelRF(train[, !names(train) %in% c("success")], train$success, var
 (varsel_vsrf <- rf_vsrf$selected.vars)
 
 # Boruta doTrace = 0 means no tracing, 1 means reporting decision about each attribute as soon as it is justified, 2 means the same as 1, plus reporting each importance source run, 3 means the same as 2, plus reporting of hits assigned to yet undecided attributes.
-(rf_boruta <- Boruta(train[, !names(train) %in% c("success")], train$success, doTrace = 0))
+#(rf_boruta <- Boruta(train[, !names(train) %in% c("success")], train$success, doTrace = 0))
+#save(rf_boruta, file='selected_vars')
+load(file= 'selected_vars')
 # Plot importance of variables
 plot(rf_boruta)
 # We just select the confirmed variables
@@ -545,11 +547,11 @@ xgb <- xgb.train(data = dtrainbig, eta = optimal_params$eta,
 # final_AUC <- AUC::auc(AUC::roc(finalpredictions, ytest))
 
 
-#Make a function for all the predictions
-predict_function <- function(test, ytest) {
+#Make the predictions
+
 predlr <- predict(logreg, newx = data.matrix(test),
                   type = "response", s = 0.0003)
-auc_lr <- AUC::auc(AUC::roc(predlr,ytest))
+auc_lr <- (AUC::auc(AUC::roc(predlr,ytest)))
 
 predNB <- predict(NB, test, type = "raw", threshold = 0.001)[,2]                                                       
 auc_nb <- AUC::auc(roc(predNB, factor(ytest)))
@@ -590,9 +592,9 @@ finalpredictions <- (auc_lr/(auc_lr + auc_nb + auc_rf + auc_ab + auc_lgbm + auc_
 
 final_AUC <- AUC::auc(AUC::roc(finalpredictions, ytest))
 
-.GlobalEnv$final_preds <- finalpredictions
-.GlobalEnv$final_AUC <- final_AUC
-}
+# .GlobalEnv$final_preds <- finalpredictions
+# .GlobalEnv$final_AUC <- final_AUC
+
 ```
 
 ```{r}
