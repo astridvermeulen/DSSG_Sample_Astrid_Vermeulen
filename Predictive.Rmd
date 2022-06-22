@@ -115,7 +115,7 @@ basetable <- basetable %>%
 #Team points in the race and amount of top_X finishes per race
 team_scores_per_race <-basetable %>%  ## CHANGES MADE
   group_by(Year, Race_ID_Stage, Team.x) %>%
-  summarise(team_points = sum(points), team_popularity = sum(Popularity), team_potential = sum(Potential),
+  summarise(team_points = sum(points), team_pos = median(Pos), team_popularity = sum(Popularity), team_potential = sum(Potential),
             team_score_flat = sum(FLAT), team_score_mountain = sum(MOUNTAIN), team_score_downhill = sum(DOWNHILL),
             team_score_cobbles = sum(COBBLES), team_score_tt = sum(TT), team_score_prologue = sum(PROLOGUE),
             team_score_sprint = sum(SPRINT), team_score_acceleration = sum(ACCELERATION), team_score_endurance = sum(ENDURANCE),
@@ -163,6 +163,7 @@ team_scores_1 <- merge(team_scores_per_race, race_cats_single,by="Race_ID_Stage"
 team_scores_2 <- merge(team_scores_per_race, race_categories,by= c("Year", "Race_ID_Stage"))
 team_scores_per_race <- rbind(team_scores_1, team_scores_2)
 
+hist(team_scores_per_race$team_pos)
 hist(team_scores_per_race$team_points)
 ```
 
@@ -222,17 +223,137 @@ hist(team_scores_per_race$team_points)
 # hist(team_scores_per_race_dep$team_points)
 ```
 
-***Defining Success***
+***Defining Relative Success***
+
+Loop takes a while, load .Rdata file below
+```{r}
+# # Add success column
+# team_scores_per_race$success_rel <- NA
+# 
+# # Get all teamnames in our dataframe
+# all_teamnames <- team_scores_per_race %>% select(Team.x) %>% distinct()
+# 
+# p_load(fuzzyjoin)
+# 
+# # define function to extract list of closely matching teamnames
+# # e.g. Astana <-> Astana Pro Team
+# get_teamname_list <- function(team_name) {
+#   team_name <- data.frame(Team.x = team_name)
+#   teamname_list <- stringdist_join(team_name, all_teamnames,
+#                                       by="Team.x",
+#                                       method = 'jw',
+#                                       max_dist=0.275,
+#                                       mode='left',
+#                                       distance_col='dist') %>%
+#                                             arrange(dist)
+#   return(teamname_list$Team.x.y)
+# }
+# 
+# # initialize progress bar
+# pb <- txtProgressBar(min = 0,
+#                      max = nrow(team_scores_per_race %>% filter(Year!=2016)),
+#                      style = 3, 
+#                      width = 50,
+#                      char = "=")
+# 
+# # loop through every row to define success
+# # for 2016 editions, we cannot compare performance relative to 2015
+# for (row in 1:nrow(team_scores_per_race %>% filter(Year!=2016))) {
+#   
+#   # get info about this observation
+#   current_pos <- team_scores_per_race[row,]$team_pos
+#   current_year <- team_scores_per_race[row,]$Year
+#   current_team <- team_scores_per_race[row,]$Team
+#   current_race_id_stage <- team_scores_per_race[row,]$Race_ID_Stage
+#   
+#   # search for the previous edition
+#   prev_year <- current_year-1
+#   matching_teamnames <- get_teamname_list(current_team)
+#   prev_race_id_stage <- current_race_id_stage
+#   
+#   i <- 1
+#   found <- FALSE
+#   while((found == FALSE) & (i < length(matching_teamnames)+1)) {
+#     search <- team_scores_per_race %>% filter(Year==prev_year,
+#                                               Race_ID_Stage==prev_race_id_stage,
+#                                               Team.x==matching_teamnames[i])
+#     i <- i + 1
+#     
+#     if(nrow(search)>0) {
+#       prev_pos <- search$team_pos
+#       found <- TRUE
+#     }
+#   }
+#   
+#   # if we found the previous edition:
+#     # success in case of higher position than previous edition
+#     # no success in case of lower position than previous edition
+#   if((nrow(search)>0)) {
+#     if(current_pos < prev_pos) {
+#       team_scores_per_race[row,]$success_rel <- 1
+#     }
+#     else {
+#       team_scores_per_race[row,]$success_rel <- 0
+#     }
+#   }
+#   
+#   setTxtProgressBar(pb, row)
+# }
+# 
+# # close process bar connection
+# close(pb)
+# 
+# # save
+# save(team_scores_per_race, file = "team_scores_per_race_success_rel.Rdata")
+```
+
+```{r}
+# loop takes a while, alternatively load in the file
+team_scores_per_race <- get(load("team_scores_per_race_success_rel.Rdata"))
+```
+
+```{r}
+# check value frequencies of "success" not including 2016
+team_scores_per_race %>% filter(Year!=2016) %>% count(success_rel)
+```
+
+
+***Defining Absolute Success***
 
 ```{r}
 #success is defined as when the team scores at least 10 points
-team_scores_per_race$success <- ifelse(team_scores_per_race$team_points >= 10, 1, 0)
-team_scores_per_race$success <- as.factor(team_scores_per_race$success)
+team_scores_per_race$success_abs <- ifelse(team_scores_per_race$team_points >= 10, 1, 0)
+team_scores_per_race$success_abs <- as.factor(team_scores_per_race$success_abs)
+team_scores_per_race %>% count(success_abs)
+```
 
+
+***Selection of Success Definition***
+#Run this cell to define succes as absolute
+```{r}
+team_scores_per_race <- team_scores_per_race %>% rename(success = success_abs) %>% select(-success_rel)
+```
+
+#Run this cell to define as relative
+```{r}
+# team_scores_per_race <- team_scores_per_race %>% rename(success = success_rel) %>% select(-success_abs)
+# 
+# # start from 2017 (for 2016 no relative successes available)
+# team_scores_per_race <- team_scores_per_race %>% filter(Year!=2016)
+# 
+# # handle other missing values
+# team_scores_per_race <- team_scores_per_race %>% drop_na(success)
+# 
+# team_scores_per_race$success <- as.factor(team_scores_per_race$success)
+```
+
+
+***Feature Transformation***
+```{r}
 #team_scores_per_race <- team_scores_per_race[, c("Team.x","Race_ID_Stage", "success")]
 
 #drop columns that are not of any use
-drop <- c("Team.x", "Year", "team_points", "Race_ID", "Race_ID_Stage", "Stage")
+drop <- c("Team.x", "Year", "team_points", "Race_ID", "Race_ID_Stage", "Stage", "team_pos")
 team_scores_per_race = team_scores_per_race[,!(names(team_scores_per_race) %in% drop)]
 
 #Make dummies from Race_category
@@ -285,9 +406,13 @@ test <- team_scores_per_race[testind, ]
 ```{r}
 # Inspect class imbalance
 table(train$success)
+```
 
-##OVERSAMPLING##
+Class imbalance should be solved when going for absolute success definition
+No significant class imbalance for relative success definition
 
+*Oversampling*
+```{r}
 # Get indices of each group
 success <- which(train$success == "1")
 fail <- which(train$success == "0")
@@ -313,6 +438,25 @@ trainsmall <- trainsmall[,names(trainsmall) != 'success']
 yval <- val$success
 val <- val[,names(val) != 'success']
 ```
+
+*SMOTE*
+```{r}
+# # Perform smote
+# p_load(unbalanced)
+# 
+# input <- train %>% mutate_if(is.character, as.factor)
+# output <- train$success
+# input$success <- NULL
+# 
+# result <- ubBalance(X = input, Y=output, positive = "1", type="ubSMOTE", percUnder = 120, percOver=500)
+# 
+# train_smote <- cbind(result$X, result$Y)
+# 
+# train_smote <- train_smote %>% rename(success=`result$Y`)
+# #check class balance
+# table(train_smote$success)
+```
+
 
 ***Variable Selection***
 
