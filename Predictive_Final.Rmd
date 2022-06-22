@@ -604,7 +604,5 @@ predict_function(test, ytest)
 final_AUC
 ```
 
-```{r}
 
-```
 
