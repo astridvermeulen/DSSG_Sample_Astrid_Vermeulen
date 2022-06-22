@@ -1,0 +1,46 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+***SHAP***
+
+```{r}
+# Load in SHAP package for XGBoost
+p_load(SHAPforxgboost)
+
+# Get SHAP values of all features
+shap_values <- shap.values(xgb_model = xgb, X_train = as.matrix(trainbig_xgb))
+shap_values$mean_shap_score
+```
+
+```{r}
+# Get plot of most important features
+shap_prepare <- shap.prep(xgb_model = xgb, X_train = as.matrix(trainbig_xgb))
+shap.plot.summary(shap_prepare)
+```
+
+```{r}
+# Dependence plots of important features
+plot(shap.plot.dependence(data_long = shap_prepare, x = "team_potential"))
+plot(shap.plot.dependence(data_long = shap_prepare, x = "team_popularity"))
+plot(shap.plot.dependence(data_long = shap_prepare, x = "avg_team_weight"))
+plot(shap.plot.dependence(data_long = shap_prepare, x = "nr_resistance_drivers"))
+```
+
+```{r}
+# Prepare data into correct format
+plot_data <- shap.prep.stack.data(shap_contrib = shap_values$shap_score)
+```
+
+```{r}
+# Force Plot
+shap.plot.force_plot(plot_data)
+```
+
+```{r}
+# Force Plot of Top 5
+plot_data <- shap.prep.stack.data(shap_contrib = shap_values$shap_score,
+    top_n = 5)
+shap.plot.force_plot(plot_data)
+```
